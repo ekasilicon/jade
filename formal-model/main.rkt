@@ -1,9 +1,6 @@
 #lang racket/base
 (require racket/match)
 
-(struct environment (mode globals transaction-group scratch-space) #:transparent)
-(struct state (pc stack scratch-space intcblock bytecblock execution-cost) #:transparent)
-
 (struct result (xs st) #:transparent)
 (struct failure (message) #:transparent)
 
@@ -18,11 +15,8 @@
 
 (define (>> m₀ m₁) (>>= m₀ (λ _ m₁)))
 
-; r, the environment, contains
-; - program
-; - globals
-; - transaction group fields / scratch space
-; - mode
+(struct environment (mode globals transaction-group scratch-space) #:transparent)
+(struct state (pc stack scratch-space intcblock bytecblock execution-cost) #:transparent)
 
 (define (transaction-index→key i)
   (if (< i 57)
@@ -31,7 +25,6 @@
                       FreezeAsset FreezeAssetAccount FreezeAssetFrozen Assets NumAssets Applications NumApplications GlobalNumUint GlobalNumByteSlice LocalNumUint LocalNumByteSlice ExtraProgramPages)
                     i))
     (fail "transaction index ~a out of range" i)))
-
 
 (define ((mode expected-mode) r st)
   (let ([actual-mode (environment-mode r)])
@@ -266,7 +259,10 @@
      (op1 "~" safe~)]))
 
 (define (op-arithw bc)
+  (match bc)
+  #;
   (define (w+ A B) (+ A B))
+  #;
   (match bc
     [#x1d ; mulw
      (stub "mulw")]
@@ -287,11 +283,14 @@
 (define (get-pc r st)
   (result (list (state-pc st)) st))
 
+(define ((bump-pc n) r st)
+  (result (list) (struct-copy state st [pc (+ (state-pc st) 1)])))
+
 (define read-byte
   (>>= get-pc
        (λ (pc)
          (if (< pc 0)
-           (error 'interpret "attempt to read negative index ~a" pc)
+           (fail "attempt to read negative index ~a" pc)
            (>>= (>>= (transaction 'OnCompletion #t)
                      (λ (oc)
                        (if (= oc 3)
@@ -299,8 +298,9 @@
                          (transaction 'ApprovalProgram #t)))) 
                 (λ (bs)
                   (if (>= pc (bytes-length bs))
-                    (error 'interpret "attempt to read at ~a but binary ends at ~a" pc (bytes-length bs))
-                    (λ (r st) (result (list (bytes-ref bs pc)) (struct-copy state st [pc (+ pc 1)]))))))))))
+                    (fail "attempt to read at ~a but binary ends at ~a" pc (bytes-length bs))
+                    (>> (bump-pc 1)
+                        (unit (bytes-ref bs pc))))))))))
 
 #;
 (define (read-byte r st)
@@ -870,7 +870,8 @@
     (let ([lsv (bytes-ref teal 0)]
           [pgm (subbytes teal 1)])
       (if (zero? (bitwise-and lsv #x80))
-        (let ([txn-group (list (hasheq #;22 'GroupIndex 0
+        (let ([txn-group (list (hasheq #;16 'TypeEnum 6
+                                       #;22 'GroupIndex 0
                                        #;26 'ApplicationArgs (list #"" #"" #"" #"" #"" #"" #"" #"" #"")))])
           (environment 'LogicSig
                        (match-lambda
@@ -893,6 +894,19 @@
                          (if (< i (length txn-group))
                            (let ([txn (list-ref txn-group i)])
                              (match key
+                               ['Type
+                                #;15
+                                (unit (match (hash-ref txn 'TypeEnum)
+                                        [0 #"unknown"]
+                                        [1 #"pay"]
+                                        [2 #"keyreg"]
+                                        [3 #"acfg"]
+                                        [4 #"axfer"]
+                                        [5 #"afrz"]
+                                        [6 #"appl"]))]
+                               ['TypeEnum
+                                #;16
+                                (unit (hash-ref txn 'TypeEnum))]
                                ['OnCompletion
                                 #;25
                                 (unit 0)]
