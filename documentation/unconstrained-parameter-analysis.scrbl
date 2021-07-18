@@ -2,6 +2,13 @@
 
 @title{Unconstrained Parameter Analysis}
 
+@; describe what it is
+At the outset of TEAL execution, the execution environment is entirely unconstrained in the sense that, theoretically, execution could succeed no matter what values it comprised.
+However, many TEAL programs are intended to succeed only when certain parameters meet certain constraints.
+These contraints could be strict, such as limiting the parameter to a single static value, or loose, such as accepting values that satisfy a particular formula.
+Which values are intended to be allowed is ultimately DApp-specific, but there are many parameters that in most cases should be limited in particular known ways, and it makes sense to verify whether the TEAL program in fact carries that limitation out.
+
+
 A TEAL program executes in the context of three things:
 an execution mode, either @tech{Signature} or @tech{Application};
 a set of global values; and
