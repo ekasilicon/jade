@@ -284,7 +284,7 @@
   (result (list (state-pc st)) st))
 
 (define ((bump-pc n) r st)
-  (result (list) (struct-copy state st [pc (+ (state-pc st) 1)])))
+  (result (list) (struct-copy state st [pc (+ (state-pc st) n)])))
 
 (define read-byte
   (>>= get-pc
@@ -874,22 +874,26 @@
                                        #;22 'GroupIndex 0
                                        #;26 'ApplicationArgs (list #"" #"" #"" #"" #"" #"" #"" #"" #"")))])
           (environment 'LogicSig
-                       (match-lambda
-                         #;MinTxnFee
-                         #;MinBalance
-                         #;MaxTxnLife
-                         ['ZeroAddress
-                          (unit (bytes->immutable-bytes (make-bytes 32 0)))]
-                         ['GroupSize
-                          (unit (length txn-group))]
-                         ['LogicSigVersion
-                          (unit lsv)]
-                         ['Round
-                          (unit 0)]
+                       (λ (key [privileged? #f])
+                         (define (access intro-version name m)
+                           (if privileged? m (>> (introduced intro-version name) m)))
+                         (match key
+                           #;MinTxnFee
+                           #;MinBalance
+                           #;MaxTxnLife
+                           ['ZeroAddress
+                            (unit (bytes->immutable-bytes (make-bytes 32 0)))]
+                           ['GroupSize
+                            (unit (length txn-group))]
+                           ['LogicSigVersion
+                            (access 2 "LogicSigVersion" (unit lsv))]
+                           ['Round
+                            (access 2 "Round" (unit 0))]
                          #;'LatestTimestamp
                          #;CurrentApplicationID
                          #;CreatorAddress
-                         )
+                         ))
+                       
                        (λ (i key)
                          (if (< i (length txn-group))
                            (let ([txn (list-ref txn-group i)])
