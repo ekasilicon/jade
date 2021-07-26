@@ -3,6 +3,7 @@
 
 (struct result (xs st) #:transparent)
 (struct failure (message) #:transparent)
+(struct success (code) #:transparent)
 
 (define ((unit . xs) r st) (result xs st))
 (define ((fail template . args) r st) (failure (apply format template args)))
@@ -14,6 +15,8 @@
     [x x]))
 
 (define (>> m₀ m₁) (>>= m₀ (λ _ m₁)))
+
+(define (get-env r st) (result (list r) st))
 
 (struct environment (mode globals transaction-group scratch-space) #:transparent)
 (struct state (pc stack scratch-space intcblock bytecblock execution-cost) #:transparent)
@@ -65,7 +68,7 @@
                   (fail "transaction field ~a requires version at least ~a; using ~a" key min-lsv lsv))))))
      (cond
        [(memq key '(Sender Fee FirstValid FirstValidTime LastValid Note Lease Receiver Amount CloseRemainderTo VotePK SelectionPK VoteFirst VoteLast VoteKeyDilution Type TypeEnum XferAsset AssetAmount AssetSender AssetReceiver AssetCloseTo GroupIndex TxID))
-        (txn-group i key)]
+        (guarded-access 1)]
        [(memq key '(ApplicationID OnCompletion ApplicationArgs NumAppArgs Accounts NumAccounts ApprovalProgram ClearStateProgram RekeyTo
                     ConfigAsset ConfigAssetTotal ConfigAssetDecimals ConfigAssetDefaultFrozen ConfigAssetUnitName ConfigAssetName ConfigAssetURL ConfigAssetMetadataHash ConfigAssetManager ConfigAssetReserve ConfigAssetFreeze ConfigAssetClawback
                     FreezeAsset FreezeAssetAccount FreezeAssetFrozen))
@@ -78,30 +81,9 @@
         (error 'interpret "unknown transaction field index ~a" key)]))
    r st))
 
-(define ((global key [privileged? #f]) r st)
-  ((let ([glbls (environment-globals r)])
-     (cond
-       [(memq key '(MinTxnFee MinBalance MaxTxnLife ZeroAddress GroupSize))
-        (glbls key)]
-       [(memq key '(LogicSigVersion Round LatestTimestamp CurrentApplicationID))
-        (if privileged?
-          (glbls key)
-          (>>= logic-sig-version
-               (λ (lsv)
-                 (if (>= lsv 2)
-                   (glbls key)
-                   (fail "global ~a requires version at least ~a; using ~a" key 2 lsv)))))]
-       [(memq key '(CreatorAddress))
-        (if privileged?
-          (glbls key)
-          (>>= logic-sig-version
-               (λ (lsv)
-                 (if (>= lsv 3)
-                   (glbls key)
-                   (fail "global ~a requires version at least ~a; using ~a" key 3 lsv)))))]
-       [else
-        (error 'interpret "unknown global index ~a" key)]))
-   r st))
+(define (global key [privileged? #f])
+  (>>= get-env
+       (λ (r) ((environment-globals r) key privileged?))))
 
 (define logic-sig-version
   (global 'LogicSigVersion #t))
@@ -286,16 +268,22 @@
 (define ((bump-pc n) r st)
   (result (list) (struct-copy state st [pc (+ (state-pc st) n)])))
 
+(define program-bytes
+  (>>= (transaction 'OnCompletion #t)
+       (λ (oc)
+         (if (= oc 3)
+           (transaction 'ClearStateProgram #t)
+           (transaction 'ApprovalProgram #t)))))
+
+(define program-length
+    (>>= program-bytes (λ (bs) (unit (bytes-length bs)))))
+
 (define read-byte
   (>>= get-pc
        (λ (pc)
          (if (< pc 0)
            (fail "attempt to read negative index ~a" pc)
-           (>>= (>>= (transaction 'OnCompletion #t)
-                     (λ (oc)
-                       (if (= oc 3)
-                         (transaction 'ClearStateProgram #t)
-                         (transaction 'ApprovalProgram #t)))) 
+           (>>= program-bytes
                 (λ (bs)
                   (if (>= pc (bytes-length bs))
                     (fail "attempt to read at ~a but binary ends at ~a" pc (bytes-length bs))
@@ -808,7 +796,15 @@
   (>> (λ (r st)
         (pretty-print st)
         (result (list) st))
-      (>>= read-opcode execute-opcode)))
+      (>> (>>= read-opcode execute-opcode)
+          (>>= get-pc
+               (λ (pc)
+                 (>>= program-length
+                      (λ (n)
+                        (if (= pc n)
+                          (λ (r st)
+                            (match (state-stack st)))
+                          (unit)))))))))
 
 (define (op-bytes bc)
   (define (bytesop name op exec-cost)
@@ -834,22 +830,18 @@
 
 
 (define (goto pc)
-  (define program-length
-    (>>= (transaction 'ApprovalProgram #t)
-         (λ (bs) (unit (bytes-length bs)))))
-  (>> (if (< pc 0)
-        (fail "destination ~a before start of program" pc)
-        (>>= program-length
-             (λ (n)
-               (if (> pc n)
-                 (fail "destination ~a strictly after end of program" pc)
-                 (>>= logic-sig-version
-                      (λ (lsv)
-                        (if (or (not (= pc n))
-                                (>= lsv 2))
-                          (unit)
-                          (fail "destination ~a at end of program in version 1" pc))))))))
-      (λ (r st) (result (list) (struct-copy state st [pc pc])))))
+  (if (< pc 0)
+    (fail "destination ~a before start of program" pc)
+    (>>= program-length
+         (λ (n)
+           (if (> pc n)
+             (fail "destination ~a strictly after end of program" pc)
+             (>>= logic-sig-version
+                  (λ (lsv)
+                    (if (or (< pc n)
+                            (>= lsv 2))
+                      (λ (r st) (result (list) (struct-copy state st [pc pc])))
+                      (fail "destination ~a at end of program in version 1" pc)))))))))
 
 (define (jump offset)
   (>>= logic-sig-version
@@ -858,11 +850,6 @@
                   (< lsv 4))
            (fail "negative offset ~a not permitted in version ~a" offset lsv)
            (>>= get-pc (λ (pc) (goto (+ pc offset))))))))
-
-(define (→n n)
-  (if (zero? n)
-    (unit)
-    (>> → (→n (sub1 n)))))
 
 (define (initialize teal)
   (if (zero? (bytes-length teal))
@@ -874,24 +861,27 @@
                                        #;22 'GroupIndex 0
                                        #;26 'ApplicationArgs (list #"" #"" #"" #"" #"" #"" #"" #"" #"")))])
           (environment 'LogicSig
-                       (λ (key [privileged? #f])
-                         (define (access intro-version name m)
-                           (if privileged? m (>> (introduced intro-version name) m)))
+                       (λ (key privileged?)
+                         (define (access min-lsv m)
+                           (if (or privileged?
+                                   (>= lsv min-lsv))
+                             m
+                             (fail "global ~a requires version at least ~a; using ~a" key min-lsv lsv)))
                          (match key
                            #;MinTxnFee
                            #;MinBalance
                            #;MaxTxnLife
                            ['ZeroAddress
-                            (unit (bytes->immutable-bytes (make-bytes 32 0)))]
+                            (access 1 (unit (bytes->immutable-bytes (make-bytes 32 0))))]
                            ['GroupSize
-                            (unit (length txn-group))]
+                            (access 1 (unit (length txn-group)))]
                            ['LogicSigVersion
-                            (access 2 "LogicSigVersion" (unit lsv))]
+                            (access 2 (unit lsv))]
                            ['Round
-                            (access 2 "Round" (unit 0))]
-                         #;'LatestTimestamp
-                         #;CurrentApplicationID
-                         #;CreatorAddress
+                            (access 2 (unit 0))]
+                           #;'LatestTimestamp
+                           #;CurrentApplicationID
+                           #;CreatorAddress
                          ))
                        
                        (λ (i key)
@@ -937,44 +927,6 @@
          (→* st)]
         [(failure msg)
          (displayln msg)]))))
-
-#;
-(struct environment (binary version mode arguments globals transaction-group-fields scratch-space) #:transparent)
-#;
-(struct state (pc stack scratch-space intcblock bytecblock execution-cost) #:transparent)
-
-(module+ test
-(→ (environment (bytes) 1 'signature (list) (hasheq) #f #f)
-   (state 0 (list) #f (list) (list) 0))
-
-(→ (environment (bytes #x00) 1 'signature (list) (hasheq) #f #f)
-   (state 0 (list) #f (list) (list) 0))
-
-(→ (environment (bytes #x81 #x01) 1 'signature (list) (hasheq) #f #f)
-   (state 0 (list) #f (list) (list) 0))
-
-(→ (environment (bytes #x81 #x01) 3 'signature (list) (hasheq) #f #f)
-   (state 0 (list) #f (list) (list) 0))
-
-((→n 0)
- (environment (bytes #x81 #x01) 3 'signature (list) (hasheq) #f #f)
- (state 0 (list) #f (list) (list) 0))
-
-((→n 1)
- (environment (bytes #x81 #x01) 3 'signature (list) (hasheq) #f #f)
- (state 0 (list) #f (list) (list) 0))
-
-((→n 2)
- (environment (bytes #x81 #x01) 3 'signature (list) (hasheq) #f #f)
- (state 0 (list) #f (list) (list) 0))
-
-((→n 3)
- (environment (bytes #x81 #x01 #x81 #x01 #x08) 3 'signature (list) (hasheq) #f #f)
- (state 0 (list) #f (list) (list) 0))
-
-  )
-
-
 
 (module+ main
   (require racket/file)
