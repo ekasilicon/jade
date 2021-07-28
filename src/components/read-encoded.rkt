@@ -1,10 +1,9 @@
-#lang racket/unit
-(require "read-sig.rkt"
-         "read-encoded-sig.rkt"
-         "monad-sig.rkt")
+#lang racket/base
 
-(import read^ monad^)
-(export read-encoded^)
+; a read-byte monad extends
+; a monad-plus (where mzero is fail and mplus is each)
+
+; these operations work for any read-byte monad
 
 (define read-opcode read-byte)
 (define read-uint8 read-byte)
