@@ -28,3 +28,30 @@ readVaruint = do
     else do
       n <- readVaruint
       return $ (shiftL n 7) .|. (b .&. 0x7F)
+
+readIntcblock :: (ReadByte m) => m [Integer]
+readIntcblock = readVaruint >>= loop
+  where loop n = if n == 0
+                 then return []
+                 else do
+          x <- readVaruint
+          xs <- loop $ n - 1
+          return $ x:xs
+
+readBytes :: (ReadByte m) => m [Word8]
+readBytes = readVaruint >>= loop
+  where loop n = if n == 0
+                 then return []
+                 else do
+          b <- readByte
+          bs <- loop $ n - 1
+          return $ b:bs
+
+readBytecblock :: (ReadByte m) => m [[Word8]]
+readBytecblock = readVaruint >>= loop
+  where loop n = if n == 0
+                 then return []
+                 else do
+          bs <- readBytes
+          bss <- loop $ n - 1
+          return $ bs:bss
