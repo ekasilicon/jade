@@ -5,9 +5,13 @@ import Abstract
 main :: IO ()
 main = getArgs >>= process
   where
-    process [] = print "done"
+    process [] = return ()
     process (arg:args) = do
-      print arg
+      putStrLn arg
       bs <- DB.readFile arg
-      print $ show $ analyze $ unpack bs
+      case analyze $ unpack bs of
+        Just (_, rs) -> go rs
+          where go [] = return ()
+                go (x:xs) = putStrLn ("  " ++ x) >> go xs
+        Nothing -> print "failed"
       process args

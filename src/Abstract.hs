@@ -98,7 +98,26 @@ aPush x (State ws pc stk lsv ib bb) = [Partial () (State ws pc (x:stk) lsv ib bb
 aPop (State ws pc [] lsv ib bb) = [Failure "attempt to pop with empty stack"]
 aPop (State ws pc (x:stk) lsv ib bb) = [Partial x (State ws pc stk lsv ib bb)]
 
+mEq x y = mplus (return Value) (fail "equality comparison between incompatible types")
+
+mLe x y = mplus (return Value) (fail "inequality comparison between non-uint64 types")
+
+mIsZero x = mplus (mplus (return True) (return False)) (fail "test of whether bytes are zero")
+
+mGlobal 3 = return $ Value -- Bytes $ replicate 32 0 ZeroAddress
+mGlobal 4 = return $ Value -- GroupSize
+mGlobal 6 = do
+  logicSigVersionGE 2 "Round"
+  return Value
+mGlobal gi = fail $ "XXX need to handle global index " ++ (show gi)
+
 mTransaction  0 = do -- Sender
+  return Value
+mTransaction  7 = do -- Receiver
+  return Value
+mTransaction  8 = do -- Amount
+  return Value
+mTransaction  9 = do -- CloseRemainderTo
   return Value
 mTransaction 16 = do -- TypeEnum
   return Value
@@ -116,14 +135,9 @@ mTransaction 29 = do
 mTransaction 32 = do
   logicSigVersionGE 2 "RekeyTo"
   return $ Value -- Symbolic RekeyTo
-mTransaction fi = fail $ "need to handle transaction field index " ++ (show fi)
+mTransaction fi = fail $ "XXX need to handle transaction field index " ++ (show fi)
 
-mGlobal 3 = return $ Value -- Bytes $ replicate 32 0 ZeroAddress
-mGlobal 4 = return $ Value -- GroupSize
-mGlobal 6 = do
-  logicSigVersionGE 2 "Round"
-  return Value
-mGlobal gi = fail $ "need to handle global index " ++ (show gi)
+mTransactionArray _ _ = return Value
 
 {-
 datumCase x onu onb = case x of
@@ -149,12 +163,6 @@ mIsZero x = datumCase x
   (\b -> fail "A is bytes but should be uint64")
 -}
 
-mEq x y = mplus (return Value) (fail "equality comparison between incompatible types")
-
-mLe x y = mplus (return Value) (fail "inequality comparison between non-uint64 types")
-
-mIsZero x = mplus (mplus (return True) (return False)) (fail "test of whether bytes are zero")
-
 aProgramCounter s@(State _ pc _ _ _ _) = [Partial pc s]
 programCounter = AVM aProgramCounter
 
@@ -169,7 +177,7 @@ goto pc = if pc < 0
                else do
   n <- programLength
   if pc > n
-    then fail $ "cannot go to pprogram counter " ++ (show pc) ++ " which exceeds program length " ++ (show n)
+    then fail $ "cannot go to program counter " ++ (show pc) ++ " which exceeds program length " ++ (show n)
     else do
     lsv <- logicSigVersion
     if lsv < 2 && pc == n
@@ -201,22 +209,34 @@ instance VM AVM Value where
   mode = mplus (return LogicSig) (return Application)
   push x = AVM $ aPush x
   pop = AVM aPop
-  transaction = mTransaction
-  global = mGlobal
+  add x y = mplus (return Value) (fail "+ overflow")
+  sub x y = mplus (return Value) (fail "- overflow")
+  div x y = mplus (return Value) (fail "/ by 0")
+  mul x y = mplus (return Value) (fail "* overflow")
+  mod x y = mplus (return Value) (fail "% by 0")
   eq = mEq
   le = mLe
   isZero = mIsZero
   jump = mJump
   finish x = AVM $ aFinish x
+  global = mGlobal
+  transaction = mTransaction
+  transactionArray = mTransactionArray
   groupTransaction gi fi = return Value
   groupTransactionArray gi fi fai = return Value
   store i x = continue -- AVM $ aStore i x
   load i = return Value
   appGlobalGet key = return Value
   appGlobalPut key value = continue
+  appLocalGet app key = return Value
+  appLocalPut app key value = return ()
   keccak256 x = mplus (return Value) (fail "keccak256 requires bytes")
   itob x = return Value
   btoi x = mplus (return Value) (fail "btoi fail: greater than eight bytes")
+  substring s e bs = mplus (return Value) (fail "substring fail: bad indices")
+  substring3 s e bs = mplus (return Value) (fail "substring fail: bad indices")
+  concat a b = mplus (return Value) (fail "concat fail: overflow")
+  getbyte a b = mplus (return Value) (fail "getbyte fail: overflow (see Go VM's behavior)")
   
 inject lsv ws = State ws 0 [] lsv [] []
 
@@ -263,41 +283,6 @@ the abstract interpreter can handle this case, even though I expect it to be ext
 
 {-
 
-isZero x = ThisVM $ \s -> Partial s True
-
-readBytes = ThisVM $ \s -> Partial s 42
-
-continue = ThisVM $ \s -> Partial s 42
-
-finish x = ThisVM $ \s -> Success x
-fail msg = ThisVM $ \s -> Failure msg
-
-jump x = ThisVM $ \s -> Partial s 42
-
-transaction fi = ThisVM $ \s -> Partial s 42
-
-global i = ThisVM $ \s -> Partial s 42
-
-load i = ThisVM $ \s -> Partial s 42
-store i x = ThisVM $ \s -> Partial s 42
-
-group_load gi i = ThisVM $ \s -> Partial s 42
-
-transaction_array fi fai = ThisVM $ \s -> Partial s 42
-
-group_transaction gi fi = ThisVM $ \s -> Partial s 42
-group_transaction_array gi fi fai = ThisVM $ \s -> Partial s 42
-
-argument i = ThisVM $ \s -> Partial s 42
-
-intcblock i = ThisVM $ \s -> Partial s 42
-putIntcblock xs = ThisVM $ \s -> Partial s 42
-
-bytecblock i = ThisVM $ \s -> Partial s 42
-putBytecblock bss = ThisVM $ \s -> Partial s 42
-
-
-
 data Mode = LogicSig | Application
   deriving Eq
 
@@ -311,4 +296,5 @@ inMode mode = do
   if mode == actualMode
     then continue
     else fail "requires mode " ++ (show mode) ++ "but in mode " ++ (show actualMode)
+
 -}    

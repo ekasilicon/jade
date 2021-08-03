@@ -1,7 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses, AllowAmbiguousTypes, FlexibleContexts, FunctionalDependencies #-}
 module VM where
 
-import Prelude hiding (fail)
+import Prelude hiding (fail, div, mod, concat)
 import Numeric (showHex)
 import Mode
 import ReadByte
@@ -19,27 +19,39 @@ class (ReadByte m, Num s) => (VM m s) | m -> s where
   logicSigVersion :: m Integer
   push :: s -> m ()
   pop :: m s
-  transaction :: Integer -> m s
-  global :: Integer -> m s
+  add :: s -> s -> m s
+  sub :: s -> s -> m s
+  div :: s -> s -> m s
+  mul :: s -> s -> m s
+  mod :: s -> s -> m s
   eq :: s -> s -> m s
   le :: s -> s -> m s
   isZero :: s -> m Bool
   jump :: Integer -> m ()
+  global :: Integer -> m s
+  transaction :: Integer -> m s
+  transactionArray :: Integer -> Integer -> m s
   groupTransaction :: Integer -> Integer -> m s
   groupTransactionArray :: Integer -> Integer -> Integer -> m s
   store :: Integer -> s -> m ()
   load :: Integer -> m s
   appGlobalGet :: s -> m s
   appGlobalPut :: s -> s -> m ()
+  appLocalGet :: s -> s -> m s
+  appLocalPut :: s -> s -> s -> m ()
   keccak256 :: s -> m s
   itob :: s -> m s
   btoi :: s -> m s
+  substring :: Integer -> Integer -> s -> m s
+  substring3 :: s -> s -> s -> m s
+  concat :: s -> s -> m s
+  getbyte :: s -> s -> m s
   
 unused :: VM m s => Integer -> m a
-unused oc = fail $ "use of unused opcode: 0x" ++ (showHex oc "")
+unused oc = fail $ "XXX use of unused opcode: 0x" ++ (showHex oc "")
 
 stub :: VM m s => String -> m a
-stub instr = fail $ "finish implementation for " ++ instr
+stub instr = fail $ "XXX finish implementation for " ++ instr
 
 continue :: VM m s => m ()
 continue = return ()
@@ -83,29 +95,22 @@ execute 0x02 = do -- keccak
 execute 0x03 = stub "sha512_256"
 execute 0x04 = stub "ed25519verify"
 -- 0x05-0x07 unused
-{-
-execute 0x08 = do
-  b <- pop_uint64
-  a <- pop_uint64
-  let c = a + b in
-    if c >= 2 ^ 64 then
-      fail "overflow +"
-      else push c
-execute 0x09 = do
-  b <- pop_uint64
-  a <- pop_uint64
-  if b > a
-    then fail "overflow -"
-    else push $ a - b
-execute 0x0a = do
-  b <- pop_uint64
-  a <- pop_uint64
-  huh <- isZero b
-  if huh
-    then fail "divide by zero"
-    else push $ a -- / b
-execute 0x0b = stub "*"
--}
+execute 0x08 = do -- +
+  b <- pop
+  a <- pop
+  add a b >>= push
+execute 0x09 = do -- -
+  b <- pop
+  a <- pop
+  sub a b >>= push
+execute 0x0a = do -- /
+  b <- pop
+  a <- pop
+  div a b >>= push
+execute 0x0b = do -- *
+  b <- pop
+  a <- pop
+  mul a b >>= push
 execute 0x0c = do
   b <- pop
   a <- pop
@@ -150,7 +155,10 @@ execute 0x14 = do -- !
 execute 0x15 = stub "len"
 execute 0x16 = (pop >>= itob) >>= push -- itob
 execute 0x17 = (pop >>= btoi) >>= push -- btoi
-execute 0x18 = stub "%"
+execute 0x18 = do -- %
+  b <- pop
+  a <- pop
+  mod a b >>= push
 execute 0x19 = stub "|"
 execute 0x1a = stub "&"
 execute 0x1b = stub "^"
@@ -188,13 +196,11 @@ execute 0x35 = do -- store
   i <- readUint8
   x <- pop
   (store i x)
-{-
 execute 0x36 = do -- txna
   logicSigVersionGE 2 "txna"
   fi <- readUint8
   fai <- readUint8
   (transactionArray fi fai) >>= push
--}
 execute 0x37 = do -- gtxna
   logicSigVersionGE 2 "gtxna"
   gi <- readUint8
@@ -252,7 +258,6 @@ execute 0x44 = do -- assert
   logicSigVersionGE 3 "assert"
   huh <- pop >>= isZero
   if huh then fail "assert zero" else continue
-{-
 -- 0x45, 0x46, 0x47
 execute 0x48 = pop >> continue -- pop
 execute 0x49 = do -- dup
@@ -290,17 +295,36 @@ execute 0x4c = do -- swap
   push a
 execute 0x4d = do -- select
   logicSigVersionGE 3 "select"
-  c <- pop
+  huh <- (pop >>= isZero)
   b <- pop
   a <- pop
-  huh <- isZero c
-  push $ if huh then b else a
-execute 0x50 = stub "concat"
-execute 0x51 = stub "substring"
-execute 0x52 = stub "substring3"
+  push $ if huh then a else b
+execute 0x50 = do -- concat
+  logicSigVersionGE 2 "concat"
+  b <- pop
+  a <- pop
+  concat a b >>= push
+execute 0x51 = do -- substring
+  logicSigVersionGE 2 "substring"
+  start <- readUint8
+  end <- readUint8
+  (pop >>= substring start end) >>= push
+execute 0x52 = do -- substring3
+  logicSigVersionGE 2 "substring"
+  end <- pop
+  start <- pop
+  (pop >>= substring3 start end) >>= push
+{-
 execute 0x53 = stub "getbit"
 execute 0x54 = stub "setbit"
-execute 0x55 = stub "getbyte"
+-}
+execute 0x55 = do -- getbyte
+  logicSigVersionGE 3 "getbyte"
+  b <- pop
+  a <- pop
+  getbyte a b >>= push
+  
+{-
 execute 0x56 = stub "setbyte"
 execute 0x57 = stub "extract"
 execute 0x58 = stub "extract3"
@@ -310,7 +334,15 @@ execute 0x5b = stub "extract64bits"
 -- 0x5c, 0x5d, 0x5e, 0x5f
 execute 0x60 = stub "balance"
 execute 0x61 = stub "app_opted_in"
-execute 0x62 = stub "app_local_get"
+-}
+execute 0x62 = do -- app_local_get
+  logicSigVersionGE 2 "app_local_get"
+  inMode Application "app_local_get"
+  b <- pop
+  a <- pop
+  appLocalGet a b >>= push
+  
+{-
 execute 0x63 = stub "app_local_get_ex"
 -}
 execute 0x64 = do
@@ -319,8 +351,15 @@ execute 0x64 = do
   (pop >>= appGlobalGet) >>= push
 {-
 execute 0x65 = stub "app_global_get_ex"
-execute 0x66 = stub "app_local_put"
 -}
+execute 0x66 = do
+  logicSigVersionGE 2 "app_local_put"
+  inMode Application "app_local_put"
+  c <- pop
+  b <- pop
+  a <- pop
+  appLocalPut a b c
+
 execute 0x67 = do
   logicSigVersionGE 2 "app_global_put"
   inMode Application "app_global_put"
