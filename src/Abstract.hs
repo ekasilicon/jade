@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, MultiWayIf #-}
 module Abstract where
 
 import Prelude hiding (fail)
@@ -26,11 +26,20 @@ data Value = Value
 instance Num Value where
   fromInteger _ = Value
 
-data State = State [Word8] Int [Value] Integer [Integer] [[Word8]]
+newtype Bytecode = Bytecode [Word8]
   deriving (Eq, Ord)
 
-instance Show State where
-  show (State _ pc stk lsv ib bb) = "State <code> " ++ (show pc) ++ " " ++ (show stk) ++ " " ++ (show lsv) ++ " " ++ (show ib) ++ " " ++ (show bb)
+instance Show Bytecode where
+  show _ = "<code>"
+
+data State = State { program :: Bytecode
+                   , pc :: Int
+                   , stack :: [Value]
+                   , logicSignatureVersion :: Integer
+                   , intcBlock :: [Integer]
+                   , bytecBlock :: [[Word8]]
+                   }
+  deriving (Show, Eq, Ord)
 
 data AResult a = Partial a State | Success Integer | Failure String
 
@@ -66,11 +75,11 @@ instance Alternative AVM where
 
 instance MonadPlus AVM
 
-aReadByte (State ws pc stk lsv ib bb) = if pc < 0
-  then [Failure "tried to read before program start"]
-  else if pc >= length ws
-  then [Failure "tried to read after program end"]
-  else [Partial (ws !! pc) (State ws (pc + 1) stk lsv ib bb)]
+aReadByte s@(State { program = (Bytecode ws)
+                   , pc = pc }) =
+  if | pc < 0 -> [Failure "tried to read before program start"]
+     | pc >= length ws -> [Failure "tried to read after program end"]
+     | otherwise -> [Partial (ws !! pc) s{ pc = pc + 1 }]
 
 instance ReadByte AVM where
   readByte = AVM aReadByte
@@ -78,25 +87,25 @@ instance ReadByte AVM where
 aFail msg _ = [Failure msg]
 aFinalize2 [x] = [Success 1, Success 0]
 aFinalize2 stk = [Failure "expected stack with one value; got "]
-aFinalize (State _ _ stk _ _ _) = aFinalize2 stk
+aFinalize s = aFinalize2 $ stack s
 mCheckFinal = do
   pc <- programCounter
   n <- programLength
   if pc == n
     then AVM aFinalize
     else continue
-aPutIntcblock  ib (State ws pc stk lsv _ bb) = [Partial () (State ws pc stk lsv ib bb)]
-aIntcblock i s@(State _ _ _ _ ib _) = if (fromInteger i) < length ib
-  then [Partial Value s]
-  else [Failure "integer constant access out of bounds"]
-aPutBytecblock bb (State ws pc stk lsv ib _) = [Partial () (State ws pc stk lsv ib bb)]
-aBytecblock i s@(State _ _ _ _ _ bb) = if (fromInteger i) < length bb
-  then [Partial Value s]
-  else [Failure "byte constant access out of bounds"]
-aLogicSigVersion s@(State _ _ _ lsv _ _) = [Partial lsv s]
-aPush x (State ws pc stk lsv ib bb) = [Partial () (State ws pc (x:stk) lsv ib bb)]
-aPop (State ws pc [] lsv ib bb) = [Failure "attempt to pop with empty stack"]
-aPop (State ws pc (x:stk) lsv ib bb) = [Partial x (State ws pc stk lsv ib bb)]
+aPutIntcblock ib s = [Partial () s{ intcBlock = ib }]
+aIntcblock i s@State{ intcBlock = ib } =
+  if | (fromInteger i) < length ib -> [Partial Value s]
+     | otherwise -> [Failure "integer constant access out of bounds"]
+aPutBytecblock bb s = [Partial () s{ bytecBlock = bb }]
+aBytecblock i s@State{ bytecBlock = bb } =
+  if | (fromInteger i) < length bb -> [Partial Value s]
+     | otherwise -> [Failure "byte constant access out of bounds"]
+aLogicSigVersion s = [Partial (logicSignatureVersion s) s]
+aPush x s@State{ stack = stk } = [Partial () s{ stack = x:stk }]
+aPop s@State{ stack = [] } = [Failure "attempt to pop with empty stack"]
+aPop s@State{ stack = x:stk } = [Partial x s{ stack = stk }]
 
 mEq x y = mplus (return Value) (fail "equality comparison between incompatible types")
 
@@ -104,8 +113,8 @@ mLe x y = mplus (return Value) (fail "inequality comparison between non-uint64 t
 
 mIsZero x = mplus (mplus (return True) (return False)) (fail "test of whether bytes are zero")
 
-mGlobal 3 = return $ Value -- Bytes $ replicate 32 0 ZeroAddress
-mGlobal 4 = return $ Value -- GroupSize
+mGlobal 3 = return Value -- $ Bytes $ replicate 32 0 ZeroAddress
+mGlobal 4 = return Value -- $ GroupSize
 mGlobal 6 = do
   logicSigVersionGE 2 "Round"
   return Value
@@ -163,13 +172,13 @@ mIsZero x = datumCase x
   (\b -> fail "A is bytes but should be uint64")
 -}
 
-aProgramCounter s@(State _ pc _ _ _ _) = [Partial pc s]
+aProgramCounter s = [Partial (pc s) s]
 programCounter = AVM aProgramCounter
 
-aPutProgramCounter pc (State ws _ stk lsv ib bb) = [Partial () (State ws pc stk lsv ib bb)]
+aPutProgramCounter pc s = [Partial () s{ pc = pc }]
 putProgramCounter pc = AVM $ aPutProgramCounter pc
 
-aProgramLength s@(State ws _ _ _ _ _) = [Partial (length ws) s]
+aProgramLength s@State{ program = Bytecode ws } = [Partial (length ws) s]
 programLength = AVM aProgramLength
 
 goto pc = if pc < 0
@@ -238,7 +247,7 @@ instance VM AVM Value where
   concat a b = mplus (return Value) (fail "concat fail: overflow")
   getbyte a b = mplus (return Value) (fail "getbyte fail: overflow (see Go VM's behavior)")
   
-inject lsv ws = State ws 0 [] lsv [] []
+inject lsv ws = State (Bytecode ws) 0 [] lsv [] []
 
 step :: VM m s => m ()
 step = do
