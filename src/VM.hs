@@ -7,7 +7,10 @@ import Mode
 import ReadByte
 import Data.Word (Word8)
 
-class (ReadByte m, Num s) => (VM m s) | m -> s where
+class Bytes a where
+  fromBytes :: [Word8] -> a
+
+class (ReadByte m, Num s, Bytes s) => (VM m s) | m -> s where
   fail :: String -> m a
   checkFinal :: m ()
   finish :: s -> m a
@@ -70,6 +73,7 @@ inMode md part = do
     then fail $ "need mode " ++ (show md) ++ " for " ++ part ++ " but in mode " ++ (show actualMd)
     else continue
 
+cost :: (Monad m) => Integer -> m ()
 cost _ = return ()
 
 {-
@@ -85,6 +89,7 @@ pop_uint64 = do
   return x
 -}
 
+execute :: VM m s => Integer -> m ()
 execute 0x00 = fail "err"
 execute 0x01 = stub "sha256"
 execute 0x02 = do -- keccak
@@ -374,14 +379,16 @@ execute 0x71 = stub "asset_params_get"
 execute 0x72 = stub "app_params_get"
 -- 0x73, 0x74, 0x75, 0x76, 0x77
 execute 0x78 = stub "min_balance"
+-}
 -- 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f
 execute 0x80 = do -- pushbytes
   logicSigVersionGE 3 "pushbytes"
-  readBytes >>= push
+  readBytes >>= push . fromBytes
 execute 0x81 = do -- pushint
   logicSigVersionGE 3 "pushint"
-  readVaruint >>= push
+  readVaruint >>= push . fromInteger
 -- 0x82, 0x83, 0x84, 0x85, 0x86, 0x87
+{-
 execute 0x88 = do -- callsub
   logicSigVersionGE 4 "callsub"
   readInt16 >>= callsub

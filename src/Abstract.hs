@@ -11,20 +11,14 @@ import Control.Applicative
 import Control.Monad hiding (fail)
 import VM
 
-{-
-data Symbol = RekeyTo
-  deriving (Eq, Ord, Show)
-
-data Value = Uint64 Integer | Bytes [Word8] | Symbolic Symbol
-  deriving (Eq, Ord, Show)
-
--}
-
 data Value = Value
   deriving (Eq, Ord, Show)
 
 instance Num Value where
   fromInteger _ = Value
+
+instance Bytes Value where
+  fromBytes _ = Value
 
 newtype Bytecode = Bytecode [Word8]
   deriving (Eq, Ord)
@@ -118,6 +112,9 @@ mGlobal 4 = return Value -- $ GroupSize
 mGlobal 6 = do
   logicSigVersionGE 2 "Round"
   return Value
+mGlobal 9 = do
+  logicSigVersionGE 3 "CreatorAddress"
+  return Value
 mGlobal gi = fail $ "XXX need to handle global index " ++ (show gi)
 
 mTransaction  0 = do -- Sender
@@ -138,6 +135,9 @@ mTransaction 24 = do
 mTransaction 25 = do
   logicSigVersionGE 2 "OnCompletion"
   return Value
+mTransaction 27 = do
+  logicSigVersionGE 2 "NumAppArgs"
+  return Value
 mTransaction 29 = do
   logicSigVersionGE 2 "NumAccounts"
   return Value
@@ -147,30 +147,6 @@ mTransaction 32 = do
 mTransaction fi = fail $ "XXX need to handle transaction field index " ++ (show fi)
 
 mTransactionArray _ _ = return Value
-
-{-
-datumCase x onu onb = case x of
-  Uint64 x -> onu x
-  Bytes x -> onb x
-  Symbolic x -> case x of
-                  RekeyTo -> onb RekeyTo
-
-mEq a b = datumCase a
-          (\ua ->
-              datumCase b
-              (\ub -> return $ Uint64 $ if ua == ub then 1 else 0)
-              (\bb -> fail "A is uint64 but B is bytes"))
-          (\ba ->
-              datumCase b
-              (\ub -> fail "A is bytes but B is uint64")
-              (\bb -> return $ Uint64 $ if ba == bb then 1 else 0))
-
-
-
-mIsZero x = datumCase x
-  (\u -> return $ u == 0)
-  (\b -> fail "A is bytes but should be uint64")
--}
 
 aProgramCounter s = [Partial (pc s) s]
 programCounter = AVM aProgramCounter
@@ -193,7 +169,6 @@ goto pc = if pc < 0
       then fail $ "cannot go to program counter " ++ (show pc) ++ " which is program length in version 1"
       else putProgramCounter pc
 
-
 mJump2 offset = do
   lsv <- logicSigVersion
   if lsv < 4 && offset < 0
@@ -204,8 +179,6 @@ mJump2 offset = do
 mJump offset = mJump2 $ fromInteger offset              
 
 aFinish x s = [Success 1, Success 0]
-
--- aStore i x (State ws pc stk ss lsv ib bb) = 
 
 instance VM AVM Value where
   fail msg = AVM $ aFail msg
