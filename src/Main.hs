@@ -9,9 +9,12 @@ main = getArgs >>= process
     process (arg:args) = do
       putStrLn arg
       bs <- DB.readFile arg
+      analyze $ unpack bs
+      {-
       case analyze $ unpack bs of
         Just (_, rs) -> go rs
           where go [] = return ()
                 go (x:xs) = putStrLn ("  " ++ x) >> go xs
         Nothing -> print "failed"
+      -}
       process args

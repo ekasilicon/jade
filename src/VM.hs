@@ -1,4 +1,4 @@
-{-# LANGUAGE MultiParamTypeClasses, AllowAmbiguousTypes, FlexibleContexts, FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses, AllowAmbiguousTypes, FlexibleContexts, FunctionalDependencies, MultiWayIf #-}
 module VM where
 
 import Prelude hiding (fail, div, mod, concat)
@@ -11,6 +11,8 @@ class Bytes a where
   fromBytes :: [Word8] -> a
 
 class (ReadByte m, Num s, Bytes s) => (VM m s) | m -> s where
+  runPrivileged :: m a -> m a
+  privileged :: m Bool
   fail :: String -> m a
   checkFinal :: m ()
   finish :: s -> m a
@@ -40,8 +42,10 @@ class (ReadByte m, Num s, Bytes s) => (VM m s) | m -> s where
   load :: Integer -> m s
   appGlobalGet :: s -> m s
   appGlobalPut :: s -> s -> m ()
+  appGlobalGetEx :: s -> s -> m (Maybe s)
   appLocalGet :: s -> s -> m s
   appLocalPut :: s -> s -> s -> m ()
+  assetHoldingGet :: s -> s -> Integer -> m (Maybe s)
   keccak256 :: s -> m s
   itob :: s -> m s
   btoi :: s -> m s
@@ -61,10 +65,13 @@ continue = return ()
 
 logicSigVersionGE :: VM m s => Integer -> String -> m ()
 logicSigVersionGE lsv part = do
-  actualLsv <- logicSigVersion
-  if lsv > actualLsv
-    then fail $ "need LogicSigVersion >= " ++ (show lsv) ++ " for " ++ part ++ " but LogicSigVersion =" ++ (show actualLsv)
-    else continue
+  priv <- privileged
+  case priv of
+    True -> continue
+    False -> do
+      actualLsv <- logicSigVersion
+      if | lsv > actualLsv -> fail $ "need LogicSigVersion >= " ++ (show lsv) ++ " for " ++ part ++ " but LogicSigVersion = " ++ (show actualLsv)
+         | otherwise -> continue
 
 inMode :: VM m s => Mode -> String -> m ()
 inMode md part = do
@@ -99,7 +106,7 @@ execute 0x02 = do -- keccak
   
 execute 0x03 = stub "sha512_256"
 execute 0x04 = stub "ed25519verify"
--- 0x05-0x07 unused
+-- 0x05, 0x06, 0x07 unused
 execute 0x08 = do -- +
   b <- pop
   a <- pop
@@ -123,13 +130,13 @@ execute 0x0c = do
 -- the following are implemented as the Go VM
 -- but we may need to treat each specially
 -- for precision purposes
-execute 0x0d = do -- >
+execute 0x0d = runPrivileged $ do -- >
   execute 0x4c -- swap
   execute 0x0c -- <
-execute 0x0e = do -- <=
+execute 0x0e = runPrivileged $ do -- <=
   execute 0x0d -- >
   execute 0x14 -- !
-execute 0x0f = do -- >=
+execute 0x0f = runPrivileged $ do -- >=
   execute 0x0c -- <
   execute 0x14 -- !
 execute 0x10 = do -- &&
@@ -150,7 +157,7 @@ execute 0x12 = do -- ==
   eq a b >>= push
 -- decomposing in this way shouldn't lose information for any lattice
 -- which distinguishes 0
-execute 0x13 = do -- !=
+execute 0x13 = runPrivileged $ do -- !=
   execute 0x12 -- ==
   execute 0x14 -- !
 execute 0x14 = do -- !
@@ -354,9 +361,19 @@ execute 0x64 = do
   logicSigVersionGE 2 "app_global_get"
   inMode Application "app_global_get"
   (pop >>= appGlobalGet) >>= push
-{-
-execute 0x65 = stub "app_global_get_ex"
--}
+execute 0x65 = do
+  logicSigVersionGE 2 "app_global_get_ex"
+  inMode Application "app_global_get_ex"
+  key <- pop
+  offset_id <- pop
+  vhuh <- appGlobalGetEx offset_id key
+  case vhuh of
+    Just value -> do
+      push value
+      push 1
+    Nothing -> do
+      push 0
+      push 0
 execute 0x66 = do
   logicSigVersionGE 2 "app_local_put"
   inMode Application "app_local_put"
@@ -374,7 +391,22 @@ execute 0x67 = do
 {-
 execute 0x68 = stub "app_local_del"
 execute 0x69 = stub "app_global_del"
-execute 0x70 = stub "asset_holding_get"
+-}
+execute 0x70 = do
+  logicSigVersionGE 2 "app_global_put"
+  inMode Application "app_global_put"
+  hfi <- readUint8
+  asst <- pop
+  acct <- pop
+  vhuh <- assetHoldingGet acct asst hfi
+  case vhuh of
+    Just value -> do
+      push value
+      push 1
+    Nothing -> do
+      push 0
+      push 0
+{-
 execute 0x71 = stub "asset_params_get"
 execute 0x72 = stub "app_params_get"
 -- 0x73, 0x74, 0x75, 0x76, 0x77
@@ -422,70 +454,3 @@ execute 0xaf = stub "bzero"
 -- the rest are unused
 execute oc = unused oc
 
-{-
-import Data.Functor
-import Control.Monad (liftM)
-import ReadByte
-
-type Code = Integer
-
-data Result s a = Partial s a | Success Code | Failure String
-
-data VM s a = ThisVM (s -> Result s a)
-
-instance Functor (VM s) where
-  fmap = liftM
-
-instance Applicative (VM s) where
-  pure x = ThisVM $ \s -> Partial s x
-
-instance Monad (VM s) where
-  (ThisVM m) >>= f = ThisVM $ \s -> case (m s) of
-                                      Partial s x -> let ThisVM m = f x in m s
-                                      Success c -> Success c
-                                      Failure s -> Failure s
-
-instance ReadByte (VM s) where
-  readByte = ThisVM $ \s -> Partial s 42
-
---class Monad m => VM m s a where
---  push :: Integer -> m a
-
-isZero x = ThisVM $ \s -> Partial s True
-
-readBytes = ThisVM $ \s -> Partial s 42
-
-continue = ThisVM $ \s -> Partial s 42
-
-finish x = ThisVM $ \s -> Success x
-fail msg = ThisVM $ \s -> Failure msg
-
-jump x = ThisVM $ \s -> Partial s 42
-
-transaction fi = ThisVM $ \s -> Partial s 42
-
-global i = ThisVM $ \s -> Partial s 42
-
-load i = ThisVM $ \s -> Partial s 42
-store i x = ThisVM $ \s -> Partial s 42
-
-group_load gi i = ThisVM $ \s -> Partial s 42
-
-transaction_array fi fai = ThisVM $ \s -> Partial s 42
-
-group_transaction gi fi = ThisVM $ \s -> Partial s 42
-group_transaction_array gi fi fai = ThisVM $ \s -> Partial s 42
-
-argument i = ThisVM $ \s -> Partial s 42
-
-intcblock i = ThisVM $ \s -> Partial s 42
-putIntcblock xs = ThisVM $ \s -> Partial s 42
-
-bytecblock i = ThisVM $ \s -> Partial s 42
-putBytecblock bss = ThisVM $ \s -> Partial s 42
-
-data Mode = LogicSig | Application
-  deriving Eq
-
-inMode mode = ThisVM $ \s -> Partial s 42
--}

@@ -10,6 +10,7 @@ import Prefix
 import Control.Applicative
 import Control.Monad hiding (fail)
 import VM
+import Trace
 
 data Value = Value
   deriving (Eq, Ord, Show)
@@ -37,9 +38,9 @@ data State = State { program :: Bytecode
 
 data AResult a = Partial a State | Success Integer | Failure String
 
-newtype AVM a = AVM (State -> [AResult a])
+newtype AVM a = AVM (Bool -> State -> [AResult a])
 
-aFmap f ac st = map bid $ ac st
+aFmap f ac pr st = map bid $ ac pr st
   where bid (Partial x st') = Partial (f x) st'
         bid (Success code)  = Success code
         bid (Failure msg)   = Failure msg
@@ -47,21 +48,21 @@ aFmap f ac st = map bid $ ac st
 instance Functor AVM where
   fmap f (AVM ac) = AVM $ aFmap f ac
 
-aPure x st = [Partial x st]
+aPure x pr st = [Partial x st]
 
 instance Applicative AVM where
   pure x = AVM $ aPure x
 
-aBind ac f st = mconcat . map bid $ ac st
-  where bid (Partial x st') = let AVM ac' = f x in ac' st'
+aBind ac f pr st = mconcat . map bid $ ac pr st
+  where bid (Partial x st') = let AVM ac' = f x in ac' pr st'
         bid (Success code)  = [Success code]
         bid (Failure msg)   = [Failure msg]
 
 instance Monad AVM where
   (AVM ac) >>= f = AVM $ aBind ac f
 
-aMzero _ = []
-aMplus (AVM ac0) (AVM ac1) s = (ac0 s) ++ (ac1 s)
+aMzero _ _ = []
+aMplus (AVM ac0) (AVM ac1) pr st = (ac0 pr st) ++ (ac1 pr st)
 
 instance Alternative AVM where
   empty = AVM aMzero
@@ -69,37 +70,37 @@ instance Alternative AVM where
 
 instance MonadPlus AVM
 
-aReadByte s@(State { program = (Bytecode ws)
-                   , pc = pc }) =
+aReadByte pr st@(State { program = (Bytecode ws)
+                       , pc = pc }) =
   if | pc < 0 -> [Failure "tried to read before program start"]
      | pc >= length ws -> [Failure "tried to read after program end"]
-     | otherwise -> [Partial (ws !! pc) s{ pc = pc + 1 }]
+     | otherwise -> [Partial (ws !! pc) st{ pc = pc + 1 }]
 
 instance ReadByte AVM where
   readByte = AVM aReadByte
 
-aFail msg _ = [Failure msg]
+aFail msg _ _ = [Failure msg]
 aFinalize2 [x] = [Success 1, Success 0]
 aFinalize2 stk = [Failure "expected stack with one value; got "]
-aFinalize s = aFinalize2 $ stack s
+aFinalize pr st = aFinalize2 $ stack st
 mCheckFinal = do
   pc <- programCounter
   n <- programLength
   if pc == n
     then AVM aFinalize
     else continue
-aPutIntcblock ib s = [Partial () s{ intcBlock = ib }]
-aIntcblock i s@State{ intcBlock = ib } =
-  if | (fromInteger i) < length ib -> [Partial Value s]
+aPutIntcblock ib pr st = [Partial () st{ intcBlock = ib }]
+aIntcblock i pr st@State{ intcBlock = ib } =
+  if | (fromInteger i) < length ib -> [Partial Value st]
      | otherwise -> [Failure "integer constant access out of bounds"]
-aPutBytecblock bb s = [Partial () s{ bytecBlock = bb }]
-aBytecblock i s@State{ bytecBlock = bb } =
-  if | (fromInteger i) < length bb -> [Partial Value s]
+aPutBytecblock bb pr st = [Partial () st{ bytecBlock = bb }]
+aBytecblock i pr st@State{ bytecBlock = bb } =
+  if | (fromInteger i) < length bb -> [Partial Value st]
      | otherwise -> [Failure "byte constant access out of bounds"]
-aLogicSigVersion s = [Partial (logicSignatureVersion s) s]
-aPush x s@State{ stack = stk } = [Partial () s{ stack = x:stk }]
-aPop s@State{ stack = [] } = [Failure "attempt to pop with empty stack"]
-aPop s@State{ stack = x:stk } = [Partial x s{ stack = stk }]
+aLogicSigVersion pr st = [Partial (logicSignatureVersion st) st]
+aPush x pr st@State{ stack = stk } = [Partial () st{ stack = x:stk }]
+aPop pr st@State{ stack = [] } = [Failure "attempt to pop with empty stack"]
+aPop pr st@State{ stack = x:stk } = [Partial x st{ stack = stk }]
 
 mEq x y = mplus (return Value) (fail "equality comparison between incompatible types")
 
@@ -148,13 +149,13 @@ mTransaction fi = fail $ "XXX need to handle transaction field index " ++ (show 
 
 mTransactionArray _ _ = return Value
 
-aProgramCounter s = [Partial (pc s) s]
+aProgramCounter pr st = [Partial (pc st) st]
 programCounter = AVM aProgramCounter
 
-aPutProgramCounter pc s = [Partial () s{ pc = pc }]
+aPutProgramCounter pc pr st = [Partial () st{ pc = pc }]
 putProgramCounter pc = AVM $ aPutProgramCounter pc
 
-aProgramLength s@State{ program = Bytecode ws } = [Partial (length ws) s]
+aProgramLength pr st@State{ program = Bytecode ws } = [Partial (length ws) st]
 programLength = AVM aProgramLength
 
 goto pc = if pc < 0
@@ -178,9 +179,11 @@ mJump2 offset = do
       goto $ pc + offset
 mJump offset = mJump2 $ fromInteger offset              
 
-aFinish x s = [Success 1, Success 0]
+aFinish x pr st = [Success 1, Success 0]
 
 instance VM AVM Value where
+  runPrivileged (AVM ac) = AVM $ \_ -> \st -> ac True st
+  privileged = AVM $ \pr -> \st -> [Partial pr st]
   fail msg = AVM $ aFail msg
   checkFinal = mCheckFinal
   putIntcblock ib = AVM $ aPutIntcblock ib
@@ -210,8 +213,10 @@ instance VM AVM Value where
   load i = return Value
   appGlobalGet key = return Value
   appGlobalPut key value = continue
+  appGlobalGetEx offset_id key = mplus (return $ Just Value) (return Nothing)
   appLocalGet app key = return Value
   appLocalPut app key value = return ()
+  assetHoldingGet _ _ _ = mplus (return $ Just Value) (return Nothing)
   keccak256 x = mplus (return Value) (fail "keccak256 requires bytes")
   itob x = return Value
   btoi x = mplus (return Value) (fail "btoi fail: greater than eight bytes")
@@ -226,10 +231,51 @@ step :: VM m s => m ()
 step = do
   readOpcode >>= execute
   checkFinal
+
+peek :: VM m s => m Integer
+peek = readOpcode
     
-run :: AVM () -> State -> [AResult ()]
-run (AVM ac) st = ac st
-  
+run :: AVM a -> State -> [AResult a]
+run (AVM ac) st = ac False st
+
+process2 :: AResult () -> IO ()
+process2 (Failure s) = putStrLn $ "  FAIL: " ++ s
+process2 (Success i) = putStrLn $ "  HALT: " ++ (show i)
+process2 (Partial () s) = go2 s
+
+process :: [AResult ()] -> IO ()
+process [] = return ()
+process (r:rs) = do
+  process2 r
+  process rs
+
+instance Trace IO where
+  traceInstr s = putStrLn s
+
+doit2 (Failure _) = return ()
+doit2 (Success _) = return ()
+doit2 (Partial oc _) = trace oc
+
+doit [] = return ()
+doit (r:rs) = do
+  doit2 r
+  doit rs
+
+go2 :: State -> IO ()
+go2 s = do
+  doit $ run peek s
+  process $ run step s
+        
+
+go :: Integer -> [Word8] -> IO ()
+go lsv ws = go2 $ inject lsv ws
+
+analyze :: [Word8] -> IO ()
+analyze ws = let Read m = readPrefix in case m ws of
+  Just (lsv,ws) -> go lsv ws
+  Nothing -> putStrLn "some error"
+
+{-
 analyze :: [Word8] -> Maybe ((Set State),[String])
 analyze ws = let Read m = readPrefix in case m ws of
   Just (lsv,ws) -> Just $ go $ inject lsv ws
@@ -245,7 +291,7 @@ analyze ws = let Read m = readPrefix in case m ws of
                                                 Success code -> go3 rs todo seen errs
                                                 Failure msg -> go3 rs todo seen (msg:errs)
   Nothing -> Nothing
-
+-}
 
 {-
 
