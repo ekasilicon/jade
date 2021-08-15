@@ -10,7 +10,7 @@ import Data.Word (Word8)
 class Bytes a where
   fromBytes :: [Word8] -> a
 
-class (ReadByte m, Num s, Bytes s) => (VM m s) | m -> s where
+class (ReadByte m, Num s, Bytes s) => VM m s | m -> s where
   runPrivileged :: m a -> m a
   privileged :: m Bool
   fail :: String -> m a
@@ -29,8 +29,8 @@ class (ReadByte m, Num s, Bytes s) => (VM m s) | m -> s where
   div :: s -> s -> m s
   mul :: s -> s -> m s
   mod :: s -> s -> m s
-  eq :: s -> s -> m s
-  le :: s -> s -> m s
+  eq :: s -> s -> m Bool
+  lt :: s -> s -> m Bool
   isZero :: s -> m Bool
   jump :: Integer -> m ()
   global :: Integer -> m s
@@ -123,10 +123,11 @@ execute 0x0b = do -- *
   b <- pop
   a <- pop
   mul a b >>= push
-execute 0x0c = do
+execute 0x0c = do -- <
   b <- pop
   a <- pop
-  le a b >>= push
+  huh <- lt a b
+  push $ if huh then 1 else 0
 -- the following are implemented as the Go VM
 -- but we may need to treat each specially
 -- for precision purposes
@@ -154,7 +155,8 @@ execute 0x11 = do -- ||
 execute 0x12 = do -- ==
   b <- pop
   a <- pop
-  eq a b >>= push
+  huh <- eq a b
+  push $ if huh then 1 else 0
 -- decomposing in this way shouldn't lose information for any lattice
 -- which distinguishes 0
 execute 0x13 = runPrivileged $ do -- !=

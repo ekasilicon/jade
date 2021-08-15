@@ -40,33 +40,25 @@ data AResult a = Partial a State | Success Integer | Failure String
 
 newtype AVM a = AVM (Bool -> State -> [AResult a])
 
-aFmap f ac pr st = map bid $ ac pr st
-  where bid (Partial x st') = Partial (f x) st'
-        bid (Success code)  = Success code
-        bid (Failure msg)   = Failure msg
-
-instance Functor AVM where
-  fmap f (AVM ac) = AVM $ aFmap f ac
-
-aPure x pr st = [Partial x st]
-
-instance Applicative AVM where
-  pure x = AVM $ aPure x
-
-aBind ac f pr st = mconcat . map bid $ ac pr st
-  where bid (Partial x st') = let AVM ac' = f x in ac' pr st'
-        bid (Success code)  = [Success code]
-        bid (Failure msg)   = [Failure msg]
-
-instance Monad AVM where
-  (AVM ac) >>= f = AVM $ aBind ac f
-
 aMzero _ _ = []
 aMplus (AVM ac0) (AVM ac1) pr st = (ac0 pr st) ++ (ac1 pr st)
 
 instance Alternative AVM where
   empty = AVM aMzero
   m0 <|> m1 = AVM $ aMplus m0 m1
+
+instance Functor AVM where
+instance Applicative AVM where
+
+
+  
+instance Monad AVM where
+  return x = AVM $ \pr st -> [Partial x st]
+  (AVM ac) >>= f = AVM $ \pr st -> mconcat . map bid $ ac pr st
+                                     where bid (Partial x st') = let AVM ac' = f x in ac' pr st'
+                                           bid (Success code)  = [Success code]
+                                           bid (Failure msg)   = [Failure msg]
+
 
 instance MonadPlus AVM
 
@@ -102,9 +94,9 @@ aPush x pr st@State{ stack = stk } = [Partial () st{ stack = x:stk }]
 aPop pr st@State{ stack = [] } = [Failure "attempt to pop with empty stack"]
 aPop pr st@State{ stack = x:stk } = [Partial x st{ stack = stk }]
 
-mEq x y = mplus (return Value) (fail "equality comparison between incompatible types")
+mEq x y = mplus (fail "equality comparison between incompatible types") $ mplus (return True) (return False) 
 
-mLe x y = mplus (return Value) (fail "inequality comparison between non-uint64 types")
+mLt x y = mplus (fail "inequality comparison between non-uint64 types") $ mplus (return True) (return False) 
 
 mIsZero x = mplus (mplus (return True) (return False)) (fail "test of whether bytes are zero")
 
@@ -200,7 +192,7 @@ instance VM AVM Value where
   mul x y = mplus (return Value) (fail "* overflow")
   mod x y = mplus (return Value) (fail "% by 0")
   eq = mEq
-  le = mLe
+  lt = mLt
   isZero = mIsZero
   jump = mJump
   finish x = AVM $ aFinish x
