@@ -1,4 +1,4 @@
-{-# LANGUAGE AllowAmbiguousTypes, FunctionalDependencies, MultiWayIf #-}
+{-# LANGUAGE AllowAmbiguousTypes, FunctionalDependencies #-}
 module VM
   ( Bytes
   , fromBytes

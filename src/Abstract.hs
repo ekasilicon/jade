@@ -1,4 +1,3 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, MultiWayIf #-}
 module Abstract ( analyze ) where
 
 import Prelude hiding (fail)
