@@ -1,0 +1,78 @@
+name:                jade
+version:             0.1.0.0
+github:              "ekasilicon/jade"
+license:             MIT
+author:              "Kimball Germane"
+maintainer:          "kimball@ekasilicon.io"
+copyright:           "2021 ekasilicon"
+description:         Please see the README on GitHub at <https://github.com/ekasilicon/jade#readme>
+
+extra-source-files:
+- README.md
+
+dependencies:
+- base >= 4.7 && < 5
+- bytestring
+- containers
+
+default-extensions:
+- BangPatterns
+- DeriveAnyClass
+- DeriveDataTypeable
+- DeriveGeneric
+- DerivingStrategies
+- EmptyDataDeriving
+- FlexibleContexts
+- FlexibleInstances
+- GeneralizedNewtypeDeriving
+- LambdaCase
+- MultiParamTypeClasses
+- MultiWayIf
+- NamedFieldPuns
+- NumericUnderscores
+- OverloadedStrings
+- PartialTypeSignatures
+- RankNTypes
+- RecordWildCards
+- ScopedTypeVariables
+- StrictData
+- TemplateHaskell
+- TupleSections
+- TypeApplications
+- TypeSynonymInstances
+
+ghc-options:
+- -Wall
+- -Werror
+- -Wcompat
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wredundant-constraints
+- -Wmissing-export-lists
+- -Wwarn=unused-top-binds
+- -O2
+
+library:
+  source-dirs: src
+
+executables:
+  jade-analyzer:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - jade
+
+tests:
+  jade-test:
+    main:                Main.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - jade

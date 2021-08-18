@@ -1,4 +1,8 @@
-module Trace where
+module Trace
+  ( Trace
+  , traceInstr
+  , trace )
+where
 
 class (Monad m) => Trace m where
   traceInstr :: [Char] -> m ()
@@ -135,4 +139,4 @@ trace 0xad = traceInstr "b^"
 trace 0xae = traceInstr "b~"
 trace 0xaf = traceInstr "bzero"
 -- the rest are unused
-trace oc = traceInstr "<unused>"
+trace _    = traceInstr "<unused>"

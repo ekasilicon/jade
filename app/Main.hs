@@ -1,5 +1,5 @@
 import System.Environment (getArgs)
-import Data.ByteString as DB (ByteString, readFile, unpack)
+import Data.ByteString as DB (readFile, unpack)
 import Abstract
 
 main :: IO ()

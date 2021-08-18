@@ -1,0 +1,146 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.34.4.
+--
+-- see: https://github.com/sol/hpack
+
+name:           jade
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/ekasilicon/jade#readme>
+homepage:       https://github.com/ekasilicon/jade#readme
+bug-reports:    https://github.com/ekasilicon/jade/issues
+author:         Kimball Germane
+maintainer:     kimball@ekasilicon.io
+copyright:      2021 ekasilicon
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/ekasilicon/jade
+
+library
+  exposed-modules:
+      Abstract
+      Mode
+      Prefix
+      ReadByte
+      Trace
+      VM
+  other-modules:
+      Paths_jade
+  hs-source-dirs:
+      src
+  default-extensions:
+      BangPatterns
+      DeriveAnyClass
+      DeriveDataTypeable
+      DeriveGeneric
+      DerivingStrategies
+      EmptyDataDeriving
+      FlexibleContexts
+      FlexibleInstances
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NumericUnderscores
+      OverloadedStrings
+      PartialTypeSignatures
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      StrictData
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      TypeSynonymInstances
+  ghc-options: -Wall -Werror -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints -Wmissing-export-lists -Wwarn=unused-top-binds -O2
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , containers
+  default-language: Haskell2010
+
+executable jade-analyzer
+  main-is: Main.hs
+  other-modules:
+      Paths_jade
+  hs-source-dirs:
+      app
+  default-extensions:
+      BangPatterns
+      DeriveAnyClass
+      DeriveDataTypeable
+      DeriveGeneric
+      DerivingStrategies
+      EmptyDataDeriving
+      FlexibleContexts
+      FlexibleInstances
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NumericUnderscores
+      OverloadedStrings
+      PartialTypeSignatures
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      StrictData
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      TypeSynonymInstances
+  ghc-options: -Wall -Werror -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints -Wmissing-export-lists -Wwarn=unused-top-binds -O2 -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , containers
+    , jade
+  default-language: Haskell2010
+
+test-suite jade-test
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  other-modules:
+      Paths_jade
+  hs-source-dirs:
+      test
+  default-extensions:
+      BangPatterns
+      DeriveAnyClass
+      DeriveDataTypeable
+      DeriveGeneric
+      DerivingStrategies
+      EmptyDataDeriving
+      FlexibleContexts
+      FlexibleInstances
+      GeneralizedNewtypeDeriving
+      LambdaCase
+      MultiParamTypeClasses
+      MultiWayIf
+      NamedFieldPuns
+      NumericUnderscores
+      OverloadedStrings
+      PartialTypeSignatures
+      RankNTypes
+      RecordWildCards
+      ScopedTypeVariables
+      StrictData
+      TemplateHaskell
+      TupleSections
+      TypeApplications
+      TypeSynonymInstances
+  ghc-options: -Wall -Werror -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints -Wmissing-export-lists -Wwarn=unused-top-binds -O2 -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , containers
+    , jade
+  default-language: Haskell2010

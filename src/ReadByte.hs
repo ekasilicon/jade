@@ -1,6 +1,16 @@
-module ReadByte where
+module ReadByte
+  ( ReadByte
+  , readByte
+  , readOpcode
+  , readUint8
+  , readInt16
+  , readVaruint
+  , readIntcblock
+  , readBytes
+  , readBytecblock )
+  where
 
-import Control.Monad (Monad,liftM)
+import Control.Monad
 import Data.Word
 import Data.Bits
 

@@ -1,8 +1,10 @@
-module Prefix where
+module Prefix
+  ( Read ( Read )
+  , readPrefix )
+where
 
 import Prelude hiding (Read)
 import Data.Word (Word8)
-import Control.Monad
 import ReadByte
 
 type ReadResult a = Maybe (a,[Word8])

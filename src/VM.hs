@@ -1,5 +1,55 @@
-{-# LANGUAGE MultiParamTypeClasses, AllowAmbiguousTypes, FlexibleContexts, FunctionalDependencies, MultiWayIf #-}
-module VM where
+{-# LANGUAGE AllowAmbiguousTypes, FunctionalDependencies, MultiWayIf #-}
+module VM
+  ( Bytes
+  , fromBytes
+  , VM
+  , runPrivileged
+  , privileged
+  , fail
+  , checkFinal
+  , finish
+  , putIntcblock
+  , intcblock
+  , putBytecblock
+  , bytecblock
+  , mode
+  , logicSigVersion
+  , push
+  , pop
+  , add
+  , sub
+  , div
+  , mul
+  , mod
+  , eq
+  , lt
+  , isZero
+  , jump
+  , global
+  , transaction
+  , transactionArray
+  , groupTransaction
+  , groupTransactionArray
+  , store
+  , load
+  , appGlobalGet
+  , appGlobalPut
+  , appGlobalGetEx
+  , appLocalGet
+  , appLocalPut
+  , assetHoldingGet
+  , keccak256
+  , itob
+  , btoi
+  , substring
+  , substring3
+  , concat
+  , getbyte
+  , execute
+  , continue
+  , logicSigVersionGE
+  )
+where
 
 import Prelude hiding (fail, div, mod, concat)
 import Numeric (showHex)
