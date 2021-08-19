@@ -64,6 +64,7 @@ library
       base >=4.7 && <5
     , bytestring
     , containers
+    , directory
   default-language: Haskell2010
 
 executable jade-analyzer
@@ -102,6 +103,7 @@ executable jade-analyzer
       base >=4.7 && <5
     , bytestring
     , containers
+    , directory
     , jade
   default-language: Haskell2010
 
@@ -142,5 +144,6 @@ test-suite jade-test
       base >=4.7 && <5
     , bytestring
     , containers
+    , directory
     , jade
   default-language: Haskell2010
