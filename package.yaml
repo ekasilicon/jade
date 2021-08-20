@@ -57,10 +57,21 @@ library:
   source-dirs: src
 
 executables:
-  jade-analyzer:
-    main:                Main.hs
+  analyzer:
+    main:                Analyzer.hs
     source-dirs:         app
     ghc-options:
+    - -main-is Analyzer
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - jade
+  executor:
+    main:                Executor.hs
+    source-dirs:         app
+    ghc-options:
+    - -main-is Executor
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N

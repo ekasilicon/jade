@@ -1,6 +1,7 @@
+module Executor ( main ) where
 import System.Environment (getArgs)
 import Data.ByteString as DB (readFile, unpack)
-import Abstract
+import Concrete
 
 main :: IO ()
 main = getArgs >>= process
@@ -9,12 +10,5 @@ main = getArgs >>= process
     process (arg:args) = do
       putStrLn arg
       bs <- DB.readFile arg
-      analyze $ unpack bs
-      {-
-      case analyze $ unpack bs of
-        Just (_, rs) -> go rs
-          where go [] = return ()
-                go (x:xs) = putStrLn ("  " ++ x) >> go xs
-        Nothing -> print "failed"
-      -}
+      _ <- executeTransactionGroup $ unpack bs
       process args

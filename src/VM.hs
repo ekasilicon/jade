@@ -32,11 +32,15 @@ module VM
   , groupTransactionArray
   , store
   , load
+  , balance
+  , minBalance
   , appGlobalGet
   , appGlobalPut
   , appGlobalGetEx
   , appLocalGet
   , appLocalPut
+  , appLocalDel
+  , assetParamsGet
   , assetHoldingGet
   , keccak256
   , itob
@@ -91,11 +95,15 @@ class (ReadByte m, Num s, Bytes s) => VM m s | m -> s where
   groupTransactionArray :: Integer -> Integer -> Integer -> m s
   store :: Integer -> s -> m ()
   load :: Integer -> m s
+  balance :: s -> m s
+  minBalance :: s -> m s
   appGlobalGet :: s -> m s
   appGlobalPut :: s -> s -> m ()
   appGlobalGetEx :: s -> s -> m (Maybe s)
   appLocalGet :: s -> s -> m s
   appLocalPut :: s -> s -> s -> m ()
+  appLocalDel :: s -> s -> m ()
+  assetParamsGet :: s -> Integer -> m (Maybe s)
   assetHoldingGet :: s -> s -> Integer -> m (Maybe s)
   keccak256 :: s -> m s
   itob :: s -> m s
@@ -409,8 +417,13 @@ execute 0x58 = stub "extract3"
 execute 0x59 = stub "extract16bits"
 execute 0x5a = stub "extract32bits"
 execute 0x5b = stub "extract64bits"
+-}
 -- 0x5c, 0x5d, 0x5e, 0x5f
-execute 0x60 = stub "balance"
+execute 0x60 = do
+  logicSigVersionGE 2 "balance"
+  inMode Application "balance"
+  (pop >>= balance) >>= push
+{-
 execute 0x61 = stub "app_opted_in"
 -}
 execute 0x62 = do -- app_local_get
@@ -454,8 +467,13 @@ execute 0x67 = do
   b <- pop
   a <- pop
   appGlobalPut a b
+execute 0x68 = do
+  logicSigVersionGE 2 "app_local_del"
+  inMode Application "app_local_del"
+  b <- pop
+  a <- pop
+  appLocalDel a b
 {-
-execute 0x68 = stub "app_local_del"
 execute 0x69 = stub "app_global_del"
 -}
 execute 0x70 = do
@@ -472,12 +490,25 @@ execute 0x70 = do
     Nothing -> do
       push 0
       push 0
-{-
-execute 0x71 = stub "asset_params_get"
+execute 0x71 = do
+  logicSigVersionGE 2 "asset_params_get"
+  inMode Application "asset_params_get"
+  api <- readUint8
+  ano <- pop
+  vhuh <- assetParamsGet ano api
+  case vhuh of
+    Just value -> do
+      push value
+      push 1
+    Nothing -> do
+      push 0
+      push 0
 execute 0x72 = stub "app_params_get"
 -- 0x73, 0x74, 0x75, 0x76, 0x77
-execute 0x78 = stub "min_balance"
--}
+execute 0x78 = do
+  logicSigVersionGE 3 "min_balance"
+  inMode Application "min_balance"
+  (pop >>= minBalance) >>= push
 -- 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f
 execute 0x80 = do -- pushbytes
   logicSigVersionGE 3 "pushbytes"

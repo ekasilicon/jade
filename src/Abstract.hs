@@ -127,6 +127,9 @@ mGlobal 4 = return Value -- $ GroupSize
 mGlobal 6 = do
   logicSigVersionGE 2 "Round"
   return Value
+mGlobal 7 = do
+  logicSigVersionGE 2 "LatestTimestamp"
+  mplus (return Value) (fail "timestamp is negative")
 mGlobal 9 = do
   logicSigVersionGE 3 "CreatorAddress"
   return Value
@@ -134,6 +137,8 @@ mGlobal gi = fail $ "XXX need to handle global index " ++ (show gi)
 
 mTransaction :: Integer -> AVM Value
 mTransaction  0 = do -- Sender
+  return Value
+mTransaction  1 = do -- Fee
   return Value
 mTransaction  7 = do -- Receiver
   return Value
@@ -226,11 +231,15 @@ instance VM AVM Value where
   groupTransactionArray _ _ _ = return Value
   store _ _ = continue -- AVM $ aStore i x
   load _ = return Value
+  balance _ = return Value
+  minBalance _ = return Value
   appGlobalGet _ = return Value
   appGlobalPut _ _ = continue
   appGlobalGetEx _ _ = mplus (return $ Just Value) (return Nothing)
   appLocalGet _ _ = return Value
   appLocalPut _ _ _ = return ()
+  appLocalDel _ _ = return ()
+  assetParamsGet _ _ = mplus (return $ Just Value) (return Nothing)
   assetHoldingGet _ _ _ = mplus (return $ Just Value) (return Nothing)
   keccak256 _ = mplus (return Value) (fail "keccak256 requires bytes")
   itob _ = return Value
