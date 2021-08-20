@@ -239,6 +239,7 @@ instance VM AVM Value where
   substring3 _ _ _  = mplus (return Value) (fail "substring fail: bad indices")
   concat _ _ = mplus (return Value) (fail "concat fail: overflow")
   getbyte _ _ = mplus (return Value) (fail "getbyte fail: overflow (see Go VM's behavior)")
+  log _ = return ()
 
 inject :: Integer -> [Word8] -> State
 inject lsv ws = State (Bytecode ws) 0 [] lsv [] []

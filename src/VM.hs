@@ -45,13 +45,14 @@ module VM
   , substring3
   , concat
   , getbyte
+  , log
   , execute
   , continue
   , logicSigVersionGE
   )
 where
 
-import Prelude hiding (fail, div, mod, concat)
+import Prelude hiding (concat, div, fail, log, mod)
 import Numeric (showHex)
 import Mode
 import ReadByte
@@ -103,6 +104,21 @@ class (ReadByte m, Num s, Bytes s) => VM m s | m -> s where
   substring3 :: s -> s -> s -> m s
   concat :: s -> s -> m s
   getbyte :: s -> s -> m s
+  log :: s -> m ()
+  -- attempt MaxLogCalls (16) + 1 fails and aborts execution
+  -- attempt to log MaxLogSize (1000) + 1 byte fails and aborts execution
+  -- perhaps write log calls to ledger
+
+{-
+an instance of VM should:
+- respect the limitations of each instruction
+  e.g., byte-arithmetic operations take at most 64 bytes per operand
+- ensure that more global limitations are enforced:
+  - max stack size (1000)
+  - max execution cost (depends on mode)
+  - max number of log calls
+  - max amount of logged data
+-}
   
 unused :: VM m s => Integer -> m a
 unused oc = fail $ "XXX use of unused opcode: 0x" ++ (showHex oc "")
@@ -195,20 +211,18 @@ execute 0x10 = do -- &&
   a <- pop
   huhb <- isZero b
   huha <- isZero a
-  push $ if huha && huhb then 1 else 0
+  push $ if huha || huhb then 0 else 1
 execute 0x11 = do -- ||
   b <- pop
   a <- pop
   huhb <- isZero b
   huha <- isZero a
-  push $ if huha || huhb then 1 else 0
+  push $ if huha && huhb then 0 else 1
 execute 0x12 = do -- ==
   b <- pop
   a <- pop
   huh <- eq a b
   push $ if huh then 1 else 0
--- decomposing in this way shouldn't lose information for any lattice
--- which distinguishes 0
 execute 0x13 = runPrivileged $ do -- !=
   execute 0x12 -- ==
   execute 0x14 -- !
@@ -503,6 +517,9 @@ execute 0xad = stub "b^"
 execute 0xae = stub "b~"
 execute 0xaf = stub "bzero"
 -}
+execute 0xb0 = do -- log
+  logicSigVersionGE 5 "log"
+  pop >>= log
 -- the rest are unused
 execute oc = unused oc
 
