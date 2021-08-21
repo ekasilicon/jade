@@ -5,6 +5,7 @@
 
 (struct VM (MonadPlus ReadByte
                       fail!
+                      return!
                       logic-sig-version
                       in-mode
                       get-pc
@@ -18,13 +19,22 @@
                       pop
                       +
                       -
+                      *
+                      len
                       itob
+                      btoi
+                      mulw
+                      addw
+                      divmodw
                       is-zero
                       &&
                       !!
-                      ==
+                      =
+                      <
                       !
+                      ~
                       concat
+                      substring3
                       transaction
                       global
                       global-transaction
@@ -34,13 +44,17 @@
                       balance
                       min-balance
                       app-local-get
+                      app-local-put
+                      app-local-del
                       asset-holding-get
+                      asset-params-get
                       check-final))
 
 ; execute : VM m s => byte → m ()
 (define (execute vm)
   (match-define (VM (MonadPlus (Monad unit >>= >>) _ _) rb
                     fail!
+                    return!
                     logic-sig-version
                     in-mode
                     get-pc
@@ -54,13 +68,22 @@
                     pop
                     vm+
                     vm-
+                    vm*
+                    len
                     itob
+                    btoi
+                    mulw
+                    addw
+                    divmodw
                     is-zero
                     &&
                     !!
-                    ==
+                    vm=
+                    vm<
                     vm!
+                    vm~
                     concat
+                    substring3
                     transaction
                     global
                     global-transaction
@@ -70,7 +93,10 @@
                     balance
                     min-balance
                     app-local-get
+                    app-local-put
+                    app-local-del
                     asset-holding-get
+                    asset-params-get
                     _ ; check-final
                     ) vm)
   (define (logic-sig-version>= target-lsv info)
@@ -120,6 +146,13 @@
                   (>>= pop (λ (x) (loop (sub1 n) (cons x xs))))))
               f)
          push))
+  (define swap
+    (>>= pop
+         (λ (b)
+           (>>= pop
+                (λ (a)
+                  (>> (push b)
+                      (push a)))))))
   (match-lambda
     [#x00 ; err
      (fail! "err")]
@@ -127,6 +160,17 @@
      (stack-apply vm+ 2)]
     [#x09 ; -
      (stack-apply vm- 2)]
+    [#x0c ; <
+     (stack-apply vm< 2)]
+    [#x0b ; *
+     (stack-apply vm* 2)]
+    [#x0d ; >
+     (>> swap
+         (stack-apply vm< 2))]
+    [#x0e ; <=
+     (>> (>> swap
+             (stack-apply vm< 2))
+         (stack-apply vm! 1))]
     [#x10 ; &&
      (stack-apply && 2)]
     [#x11 ; ||
@@ -145,14 +189,26 @@
                         push)))))
      (stack-apply !! 2)]
     [#x12 ; ==
-     (stack-apply == 2)]
+     (stack-apply vm= 2)]
     [#x13 ; !=
-     (>> ((execute vm) #x12)   ; ==
-         ((execute vm) #x14))] ; !
+     (>> (stack-apply vm= 2)
+         (stack-apply vm! 1))]
     [#x14 ; !
      (stack-apply vm! 1)]
+    [#x15 ; len
+     (stack-apply len 1)]
     [#x16 ; itob
      (stack-apply itob 1)]
+    [#x17 ; btoi
+     (stack-apply btoi 1)]
+    [#x1c ; ~
+     (stack-apply vm~ 1)]
+    [#x1d ; mulw
+     (>>= pop (λ (b) (>>= pop (λ (a) (mulw a b)))))]
+    [#x1e ; addw
+     (>>= pop (λ (b) (>>= pop (λ (a) (addw a b)))))]
+    [#x1f ; divmodw
+     (>>= pop (λ (d) (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (divmodw a b c d)))))))))]
     [#x20 ; intcblock
      (>>= (>>= (read-varuint rb)
                (λ (n)
@@ -235,6 +291,9 @@
     [#x42 ; b
      (>> (logic-sig-version>= 2 "b")
          (>>= (read-int16 rb) jump))]
+    [#x43 ; return
+     (>> (logic-sig-version>= 2 "return")
+         (>>= pop return!))]
     [#x44 ; assert
      (>> (logic-sig-version>= 3 "assert")
          (>>= pop
@@ -242,16 +301,45 @@
                 (>>= (is-zero x)
                      (λ (fail?)
                        (if fail?
-                         (fail! "assert of ~a failed" x)
+                         (fail! "assert of ~v failed" x)
                          continue))))))]
+    [#x48 ; pop
+     (>> pop
+         continue)]
     [#x49 ; dup
      (>>= pop
           (λ (x)
             (>> (push x)
                 (push x))))]
+    [#x4a ; dup2
+     (>> (logic-sig-version>= 2 "dup2")
+         (>>= pop
+              (λ (b)
+                (>>= pop
+                     (λ (a)
+                       (>> (push a)
+                           (>> (push b)
+                               (>> (push a)
+                                   (push b)))))))))]
+    [#x4c ; swap
+     (>> (logic-sig-version>= 3 "swap")
+         swap)]
+    [#x4d ; select
+     (>> (logic-sig-version>= 3 "swap")
+         (>>= pop
+              (λ (c)
+                (>>= pop
+                     (λ (b)
+                       (>>= pop
+                            (λ (a)
+                              (>>= (is-zero c)
+                                   (λ (zero?) (push (if zero? a b)))))))))))]
     [#x50 ; concat
      (>> (logic-sig-version>= 2 "concat")
          (stack-apply concat 2))]
+    [#x52 ; substring3
+     (>> (logic-sig-version>= 2 "substring3")
+         (stack-apply substring3 3))]
     [#x60 ; balance
      (>> (logic-sig-version>= 2 "balance")
          (>> (in-mode 'Application "balance")
@@ -260,23 +348,24 @@
      (>> (logic-sig-version>= 2 "app_local_get")
          (>> (in-mode 'Application "app_local_get")
              (stack-apply app-local-get 2)))]
+    [#x66 ; app_local_put
+     (>> (logic-sig-version>= 2 "app_local_put")
+         (>> (in-mode 'Application "app_local_put")
+             (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c)))))))))]
+    [#x68 ; app_local_del
+     (>> (logic-sig-version>= 2 "app_local_del")
+         (>> (in-mode 'Application "app_local_del")
+             (>>= pop (λ (b) (>>= pop (λ (a) (app-local-del a b)))))))]
     [#x70 ; asset_holding_get
      (>> (logic-sig-version>= 2 "asset_holding_get")
          (>> (in-mode 'Application "asset_holding_get")
              (>>= (read-uint8 rb)
-                  (λ (fi)
-                    (>>= pop
-                         (λ (b)
-                           (>>= pop
-                                (λ (a)
-                                  (>>= (asset-holding-get a b fi)
-                                       (match-lambda
-                                         [#f
-                                          (>> (push 0)
-                                              (push 0))]
-                                         [v
-                                          (>> (push v)
-                                              (push 1))]))))))))))]
+                  (λ (fi) (>>= pop (λ (b) (>>= pop (λ (a) (asset-holding-get a b fi)))))))))]
+    [#x71 ; asset_params_get
+     (>> (logic-sig-version>= 2 "asset_params_get")
+         (>> (in-mode 'Application "asset_params_get")
+             (>>= (read-uint8 rb)
+                  (λ (fi) (>>= pop (λ (a) (asset-params-get a fi)))))))]
     [#x78 ; min_balance
      (>> (logic-sig-version>= 3 "min_balance")
          (>> (in-mode 'Application "min_balance")
@@ -296,6 +385,7 @@
 (define (step vm)
   (match-define (VM (MonadPlus (Monad _ >>= >>) _ _) rb
                     _ ; fail!
+                    _ ; return!
                     _ ; logic-sig-version
                     _ ; in-mode
                     _ ; get-pc
@@ -309,13 +399,22 @@
                     _ ; pop
                     _ ; +
                     _ ; -
+                    _ ; *
+                    _ ; len
                     _ ; itob
+                    _ ; btoi
+                    _ ; mulw
+                    _ ; addw
+                    _ ; divmodw
                     _ ; is-zero
                     _ ; &&
                     _ ; !!
-                    _ ; ==
+                    _ ; =
+                    _ ; <
                     _ ; !
+                    _ ; ~
                     _ ; concat
+                    _ ; substring3
                     _ ; transaction
                     _ ; global
                     _ ; global-transaction
@@ -325,7 +424,10 @@
                     _ ; balance
                     _ ; min-balance
                     _ ; app-local-get
+                    _ ; app-local-put
+                    _ ; app-local-del
                     _ ; asset-holding-get
+                    _ ; asset-params-get
                     check-final
                     ) vm)
   (>> (>>= (read-opcode rb)

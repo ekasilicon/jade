@@ -18,7 +18,9 @@
           'intcblock (list)
           'bytecblock (list)
           'scratch-space (hasheqv)
-          'path-condition (r:set)))
+          'path-condition (r:set)
+          'app-local (list) ; at best a map, at worst a sequence of puts
+          'app-global (list)))
 
 (struct underway (xs state))
 (struct returned (code))
@@ -85,9 +87,20 @@
 ; instance VM <hash-thing>
 (define Step-VM
   (match-let ([(MonadPlus (Monad unit >>= >>) mzero mplus) Step-MonadPlus])
+    (define (push x) (update stack (λ (stk) (cons x stk))))
+    (define pop
+      (>>= (get stack)
+           (match-lambda
+             [(cons x stk)
+              (>> (set stack stk)
+                  (unit x))]
+             [(list)
+              (fail! "tried to pop an empty stack")])))
     (VM Step-MonadPlus Step-ReadByte
         ; fail!
         fail!
+        ; return!
+        return
         ; logic-sig-version
         (get logic-sig-version)
         ; in-mode
@@ -115,49 +128,114 @@
         ; put-bytecblock
         (λ (bss) (set bytecblock bss))
         ; push
-        (λ (x) (update stack (λ (stk) (cons x stk))))
+        push
         ; pop
-        (>>= (get stack)
-             (match-lambda
-               [(cons x stk)
-                (>> (set stack stk)
-                    (unit x))]
-               [(list)
-                (fail! "tried to pop an empty stack")]))
+        pop
         ; +
         (λ (x y) (unit `(+ ,x ,y)))
         ; -
         (λ (x y) (unit `(- ,x ,y)))
+        ; *
+        (λ (x y) (unit `(* ,x ,y)))
+        ; len
+        (λ (x) (unit `(len ,x)))
         ; itob
         (λ (x) (unit `(itob ,x)))
+        ; btoi
+        (λ (x)
+          (mplus (fail! "~v longer than 8 bytes" x)
+                 (unit `(btoi ,x))))
+        ; mulw
+        (λ (a b)
+          (>> (push `(hi (mulw ,a ,b)))
+              (push `(lo (mulw ,a ,b)))))
+        ; addw
+        (λ (a b)
+          (>> (push `(hi (addw ,a ,b)))
+              (push `(lo (addw ,a ,b)))))
+        ; divmodw
+        (λ (a b c d)
+          (let ([dend (match* (a b)
+                        [(`(hi ,x) `(lo ,x)) x]
+                        [(x y) `(uint128 ,x ,y)])]
+                [isor (match* (c d)
+                        [(`(hi ,x) `(lo ,x)) x]
+                        [(x y) `(uint128 ,x ,y)])])
+            (>> (push `(hi (quotient ,dend ,isor)))
+                (>> (push `(lo (quotient ,dend ,isor)))
+                    (>> (push `(hi (remainder ,dend ,isor)))
+                        (push `(lo (remainder ,dend ,isor))))))))
         ; is-zero
         (λ (c)
+          (define ((add-path-condition c) pc)
+            (let loop ([c c]
+                       [pc pc])
+              (match c
+                [`(&& ,c₀ ,c₁)
+                 (loop c₁ (loop c₀ pc))]
+                [`(¬ (∨ ,c₀ ,c₁))
+                 (loop `(¬ ,c₁) (loop `(¬ ,c₀) pc))]
+                [`(¬ (&& ,c₀ ,c₁))
+                 (r:set-add pc `(∨ (¬ ,c₀) (¬ ,c₁)))]
+                [c
+                 (r:set-add pc c)])))
+          (define affirm-path-condition
+            (match-lambda
+              [`(¬ ,c)
+               (negate-path-condition c)]
+              [c
+               (add-path-condition c)]))
+          (define negate-path-condition
+            (match-lambda
+              [`(¬ ,c)
+               (affirm-path-condition c)]
+              [c
+               (add-path-condition `(¬ ,c))]))
           (define (verify m c)
             (>>= (get path-condition)
                  (λ (pc)
-                   (pretty-print pc)
-                   (displayln "---")
-                   (pretty-print c)
-                   (displayln "Can the above condition hold?")
-                   (if (read) m mzero))))
-          (mplus (verify (>> (update path-condition (λ (cs) (r:set-add cs `(~ ,c))))
+                   (cond
+                     [(r:set-empty? pc)
+                      ; no constraints yet
+                      m]
+                     [else
+                      m
+                      #;
+                      (pretty-print pc)
+                      #;
+                      (displayln "---")
+                      #;
+                      (pretty-print c)
+                      #;
+                      (displayln "Can the above condition hold?")
+                      #;
+                      (if (read) m mzero)]))))
+          (mplus (verify (>> (update path-condition (negate-path-condition c))
                              (unit #t))
-                         `(~ ,c))
-                 (verify (>> (update path-condition (λ (cs) (r:set-add cs c)))
+                         `(¬ ,c))
+                 (verify (>> (update path-condition (affirm-path-condition c))
                              (unit #f))
                          c)))
         ; &&
-        (λ (x y) (unit `(&& ,x ,y)))
+        (λ (x y) (unit `(∧ ,x ,y)))
         ; ||
-        (λ (x y) (unit `(!! ,x ,y)))
-        ; ==
-        (λ (x y) (unit `(== ,x ,y)))
+        (λ (x y) (unit `(∨ ,x ,y)))
+        ; =
+        (λ (x y) (unit `(= ,x ,y)))
+        ; <
+        (λ (x y) (unit `(< ,x ,y)))
         ; !
         (match-lambda
-          [`(~ ,c) (unit c)]
-          [c (unit `(~ ,c))])
+          [`(¬ ,c) (unit c)]
+          [c (unit `(¬ ,c))])
+        ; ~
+        (λ (x) (unit `(~ ,x)))
         ; concat
         (λ (x y) (unit `(concat ,x ,y)))
+        ; substring3
+        (λ (a b c)
+          (mplus (fail! "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c))
+                 (unit `(substring3 ,a ,b ,c))))
         ; transaction
         (match-lambda
           [0  ; Sender
@@ -178,14 +256,25 @@
            (>> (logic-sig-version>= 2 "LatestTimestamp")
                (unit 'LatestTimestamp))
            (mplus (fail! "negative LatestTimestamp")
-                  (unit 'LatestTimestamp))])
+                  (unit 'LatestTimestamp))]
+          [9 ; CreatorAddress
+           ; logicsigversion 3
+           ; "Address of the creator of the current application. Fails if no such application is executing."
+           (unit 'CreatorAddress)])
         ; global-transaction
         (λ (ti fi)
           (match fi
             [8  ; Amount
              (unit `(txn ,ti Amount))]
+            [17 ; XferAsset
+             (unit `(txn ,ti XferAsset))]
             [18 ; AssetAmount
-             (unit `(txn ,ti AssetAmount))]))
+             (unit `(txn ,ti AssetAmount))]
+            [20 ; AssetReceiver
+             (unit `(txn ,ti AssetReceiver))]
+            [38 ; ConfigAssetName
+             ; lsv >= 2
+             (unit 'ConfigAssetName)]))
         ; transaction-array
         (λ (fi ai)
           (match fi
@@ -207,11 +296,49 @@
         ; min-balance
         (λ (acct) (unit `(min-balance ,acct)))
         ; app-local-get
-        (λ (aid key) (unit `(app-local-get ,aid ,key)))
+        (λ (aid key)
+          (>>= (get app-local)
+               (match-lambda
+                 [(list)
+                  (unit `(app-local-get ,aid ,key))]
+                 [al
+                  (match `(app-local-get ,aid ,key)
+                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a2"))))
+                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a2")))))]
+                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a1"))))
+                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a1")))))]
+                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"lt"))))
+                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"lt")))))]
+                    ['(app-local-get 0 #"c2")
+                     (unit '(app-local-get 0 #"c2"))]
+                    ['(app-local-get 0 #"p2")
+                     (unit '(app-local-get 0 #"p2"))]
+                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (txn 2 XferAsset))))
+                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (txn 2 XferAsset)))))]
+                    [_
+                     (pretty-print al)
+                     (pretty-print `(app-local-get ,aid ,key))
+                     (failure-cont)])])))
+        ; app-local-put
+        (λ (acct key val)
+          (update app-local (λ (al) (cons `(put ,acct ,key ,val) al))))
+        ; app-local-del
+        (λ (acct key)
+          (update app-local (λ (al) (cons `(del ,acct ,key) al))))
         ; asset-holding-get
         (λ (acct asset x)
-          (mplus (unit `(asset-holding-get ,acct ,asset ,x))
-                 (unit #f)))
+          (>>= (unit 42)
+               (match-lambda
+                 [42
+                  (>> (push `(asset-holding-get ,acct ,asset ,x))
+                      (push `(asset-holding-get-exists ,acct ,asset ,x)))])))
+        ; asset-params-get
+        (λ (asset x)
+          (>>= (unit 42)
+               (match-lambda
+                 [42
+                  (>> (push `(asset-params-get ,asset ,x))
+                      (push `(asset-params-get-exists ,asset ,x)))])))
         ; check-final
         (>>= (get bytecode)
              (λ (bc)
@@ -235,13 +362,17 @@
      (match ((read-prefix read-ReadByte) (file->bytes filename))
        [(cons lsv bs)
         (let loop ([st (inject lsv bs)])
-          (pretty-print (hash-remove st 'bytecode))
-          (printf "0x~a\n" (number->string (bytes-ref (hash-ref st 'bytecode) (hash-ref st 'pc))
-                                           16))
+          #;(pretty-print (hash-remove st 'bytecode))
+          (printf "~a: 0x~a\n"
+                  (hash-ref st 'pc)
+                  (number->string (bytes-ref (hash-ref st 'bytecode) (hash-ref st 'pc))
+                                  16))
           (for-each
            (match-lambda
              [(underway (list) st)
               (loop st)]
              [(failure! msg)
-              (printf "FAIL: ~a\n" msg)])
+              (printf "FAIL: ~a\n" msg)]
+             [(returned code)
+              (printf "RETURN: ~v\n" code)])
            ((step Step-VM) st)))])]))
