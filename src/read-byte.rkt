@@ -3,6 +3,7 @@
          "monad.rkt")
 
 ; class Monad m => ReadByte
+; read-byte :: m byte
 (struct ReadByte (Monad read-byte))
 
 ; ReadByte => m byte
@@ -25,7 +26,7 @@
                 (let ([x (+ (* 256 bu) bl)])
                   (unit (if (< x (expt 2 15))
                           x
-                          (- x (exp 2 16))))))))))
+                          (- x (expt 2 16))))))))))
 
 
 ; ReadByte => m varuint
@@ -35,12 +36,12 @@
        (λ (b)
          (if (zero? (bitwise-and b #x80))
            (unit b)
-           (>>= read-varuint (λ (n) (unit (+ b (* n 128)))))))))
+           (>>= (read-varuint rb) (λ (n) (unit (+ (bitwise-and b #x7F) (* n #x80)))))))))
 
 ; ReadByte => m bytes
 (define (read-bytes rb)
   (match-define (ReadByte (Monad unit >>= >>) read-byte) rb)
-  (>>= (>>= read-varuint
+  (>>= (>>= (read-varuint rb)
             (λ (n)
               (let loop ([n n])
                 (if (zero? n)
