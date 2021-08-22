@@ -175,7 +175,7 @@
             (let loop ([c c]
                        [pc pc])
               (match c
-                [`(&& ,c₀ ,c₁)
+                [`(∧ ,c₀ ,c₁)
                  (loop c₁ (loop c₀ pc))]
                 [`(¬ (∨ ,c₀ ,c₁))
                  (loop `(¬ ,c₁) (loop `(¬ ,c₀) pc))]
@@ -410,6 +410,7 @@
              [(underway (list) st)
               (loop st)]
              [(failure! msg)
+              (pretty-print (hash-remove st 'bytecode))
               (printf "FAIL: ~a\n" msg)]
              [(returned code)
               (pretty-print (hash-remove st 'bytecode))
