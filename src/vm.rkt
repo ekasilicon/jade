@@ -19,10 +19,12 @@
                       pop
                       +
                       -
+                      /
                       *
                       len
                       itob
                       btoi
+                      %
                       mulw
                       addw
                       divmodw
@@ -46,6 +48,8 @@
                       app-local-get
                       app-local-put
                       app-local-del
+                      app-global-get
+                      app-global-put
                       asset-holding-get
                       asset-params-get
                       check-final))
@@ -68,10 +72,12 @@
                     pop
                     vm+
                     vm-
+                    vm/
                     vm*
                     len
                     itob
                     btoi
+                    %
                     mulw
                     addw
                     divmodw
@@ -95,6 +101,8 @@
                     app-local-get
                     app-local-put
                     app-local-del
+                    app-global-get
+                    app-global-put
                     asset-holding-get
                     asset-params-get
                     _ ; check-final
@@ -160,10 +168,20 @@
      (stack-apply vm+ 2)]
     [#x09 ; -
      (stack-apply vm- 2)]
-    [#x0c ; <
-     (stack-apply vm< 2)]
+    [#x0a ; /
+     (>>= pop
+          (λ (b)
+            (>>= pop
+                 (λ (a)
+                   (>>= (is-zero b)
+                        (λ (zero?)
+                          (if zero?
+                            (fail! "/ by 0")
+                            (>>= (vm/ a b) push))))))))]
     [#x0b ; *
      (stack-apply vm* 2)]
+    [#x0c ; <
+     (stack-apply vm< 2)]
     [#x0d ; >
      (>> swap
          (stack-apply vm< 2))]
@@ -171,22 +189,12 @@
      (>> (>> swap
              (stack-apply vm< 2))
          (stack-apply vm! 1))]
+    [#x0f ; >=
+     (>> (stack-apply vm< 2)
+         (stack-apply vm! 1))]
     [#x10 ; &&
      (stack-apply && 2)]
     [#x11 ; ||
-     #;
-     (>>= pop
-          (λ (b)
-            (>>= pop
-                 (λ (a)
-                   (>>= (>>= (is-zero a) 
-                             (λ (a-zero?)
-                               (if a-zero?
-                                 (>>= (is-zero b)
-                                      (λ (b-zero?)
-                                        (if b-zero?
-                                          ))))))
-                        push)))))
      (stack-apply !! 2)]
     [#x12 ; ==
      (stack-apply vm= 2)]
@@ -201,6 +209,16 @@
      (stack-apply itob 1)]
     [#x17 ; btoi
      (stack-apply btoi 1)]
+    [#x18 ; %
+     (>>= pop
+          (λ (b)
+            (>>= pop
+                 (λ (a)
+                   (>>= (is-zero b)
+                        (λ (zero?)
+                          (if zero?
+                            (fail! "% by 0")
+                            (>>= (% a b) push))))))))]
     [#x1c ; ~
      (stack-apply vm~ 1)]
     [#x1d ; mulw
@@ -348,10 +366,18 @@
      (>> (logic-sig-version>= 2 "app_local_get")
          (>> (in-mode 'Application "app_local_get")
              (stack-apply app-local-get 2)))]
+    [#x64 ; app_global_get
+     (>> (logic-sig-version>= 2 "app_global_get")
+         (>> (in-mode 'Application "app_global_get")
+             (stack-apply app-global-get 1)))]
     [#x66 ; app_local_put
      (>> (logic-sig-version>= 2 "app_local_put")
          (>> (in-mode 'Application "app_local_put")
              (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c)))))))))]
+    [#x67 ; app_global_put
+     (>> (logic-sig-version>= 2 "app_global_put")
+         (>> (in-mode 'Application "app_global_put")
+             (>>= pop (λ (b) (>>= pop (λ (a) (app-global-put a b)))))))]
     [#x68 ; app_local_del
      (>> (logic-sig-version>= 2 "app_local_del")
          (>> (in-mode 'Application "app_local_del")
@@ -399,10 +425,12 @@
                     _ ; pop
                     _ ; +
                     _ ; -
+                    _ ; /
                     _ ; *
                     _ ; len
                     _ ; itob
                     _ ; btoi
+                    _ ; %
                     _ ; mulw
                     _ ; addw
                     _ ; divmodw
@@ -426,6 +454,8 @@
                     _ ; app-local-get
                     _ ; app-local-put
                     _ ; app-local-del
+                    _ ; app-global-get
+                    _ ; app-global-put
                     _ ; asset-holding-get
                     _ ; asset-params-get
                     check-final

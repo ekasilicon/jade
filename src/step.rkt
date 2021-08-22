@@ -135,6 +135,8 @@
         (λ (x y) (unit `(+ ,x ,y)))
         ; -
         (λ (x y) (unit `(- ,x ,y)))
+        ; /
+        (λ (x y) (unit `(/ ,x ,y)))
         ; *
         (λ (x y) (unit `(* ,x ,y)))
         ; len
@@ -145,6 +147,8 @@
         (λ (x)
           (mplus (fail! "~v longer than 8 bytes" x)
                  (unit `(btoi ,x))))
+        ; %
+        (λ (x y) (unit `(% ,x ,y)))
         ; mulw
         (λ (a b)
           (>> (push `(hi (mulw ,a ,b)))
@@ -242,6 +246,11 @@
            (unit 'Sender)]
           [1  ; Fee 
            (unit 'Fee)]
+          [16 ; TypeEnum
+           (unit 'TypeEnum)]
+          [24 ; ApplicationID
+           ; lsv >= 2
+           (unit 'ApplicationID)]
           [25 ; OnCompletion
            (unit 'OnCompletion)]
           [27 ; NumAppArgs
@@ -251,6 +260,11 @@
            (unit 'NumAppArgs)])
         ; global
         (match-lambda
+          [4 ; GroupSize
+           (unit 'GroupSize)]
+          [6 ; Round
+           ; lsv >= 2
+           (unit 'Round)]
           [7 ; LatestTimestamp
            #;
            (>> (logic-sig-version>= 2 "LatestTimestamp")
@@ -264,8 +278,14 @@
         ; global-transaction
         (λ (ti fi)
           (match fi
+            [0  ; Sender
+             (unit `(txn ,ti Sender))]
+            [7  ; Receiver
+             (unit `(txn ,ti Receiver))]
             [8  ; Amount
              (unit `(txn ,ti Amount))]
+            [16 ; TypeEnum
+             (unit `(txn ,ti TypeEnum))]
             [17 ; XferAsset
              (unit `(txn ,ti XferAsset))]
             [18 ; AssetAmount
@@ -325,6 +345,24 @@
         ; app-local-del
         (λ (acct key)
           (update app-local (λ (al) (cons `(del ,acct ,key) al))))
+        ; app-global-get
+        (λ (key)
+          (>>= (get app-global)
+               (match-lambda
+                 [(list) (unit `(app-global-get ,key))]
+                 [ag
+                  (match `(app-global-get ,key)
+                    ['(app-global-get #"End round")
+                     (unit '(app-global-get #"End round"))]
+                    ['(app-global-get #"Duration")
+                     (unit '(app-global-get #"Duration"))]
+                    [_
+                     (pretty-print ag)
+                     (pretty-print `(app-global-get ,key))
+                     (failure-cont)])])))
+        ; app-global-put
+        (λ (key val)
+          (update app-global (λ (ag) (cons `(put ,key ,val) ag))))
         ; asset-holding-get
         (λ (acct asset x)
           (>>= (unit 42)
@@ -374,5 +412,18 @@
              [(failure! msg)
               (printf "FAIL: ~a\n" msg)]
              [(returned code)
+              (pretty-print (hash-remove st 'bytecode))
               (printf "RETURN: ~v\n" code)])
            ((step Step-VM) st)))])]))
+
+#;
+(= (hi (mulw (+ (+ (txn 4 AssetAmount) 1000) 1)
+             (+ (+ (txn 4 AssetAmount) 1000) 1)))
+   (hi (mulw (+ (txn 2 AssetAmount) (txn 2 Amount))
+             (+ (txn 3 AssetAmount) (txn 3 Amount)))))
+
+#;
+(< (lo (mulw (+ (txn 2 AssetAmount) (txn 2 Amount))
+             (+ (txn 3 AssetAmount) (txn 3 Amount))))
+   (lo (mulw (+ (+ (txn 4 AssetAmount) 1000) 1)
+             (+ (+ (txn 4 AssetAmount) 1000) 1))))
