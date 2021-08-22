@@ -249,32 +249,27 @@
           [16 ; TypeEnum
            (unit 'TypeEnum)]
           [24 ; ApplicationID
-           ; lsv >= 2
-           (unit 'ApplicationID)]
+           (>> ((logic-sig-version>= Step-VM) 2 "ApplicationID")
+               (unit 'ApplicationID))]
           [25 ; OnCompletion
            (unit 'OnCompletion)]
           [27 ; NumAppArgs
-           #;
-           (>> (logic-sig-version>= 2 "NumAppArgs")
-               (unit 'NumAppArgs))
-           (unit 'NumAppArgs)])
+           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+               (unit 'NumAppArgs))])
         ; global
         (match-lambda
           [4 ; GroupSize
            (unit 'GroupSize)]
           [6 ; Round
-           ; lsv >= 2
-           (unit 'Round)]
+           (>> ((logic-sig-version>= Step-VM) 2 "Round")
+               (unit 'Round))]
           [7 ; LatestTimestamp
-           #;
-           (>> (logic-sig-version>= 2 "LatestTimestamp")
-               (unit 'LatestTimestamp))
-           (mplus (fail! "negative LatestTimestamp")
-                  (unit 'LatestTimestamp))]
+           (>> ((logic-sig-version>= Step-VM) 2 "LatestTimestamp")
+               (unit 'LatestTimestamp))]
           [9 ; CreatorAddress
-           ; logicsigversion 3
            ; "Address of the creator of the current application. Fails if no such application is executing."
-           (unit 'CreatorAddress)])
+           (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
+               (unit 'CreatorAddress))])
         ; global-transaction
         (λ (ti fi)
           (match fi
@@ -293,17 +288,17 @@
             [20 ; AssetReceiver
              (unit `(txn ,ti AssetReceiver))]
             [38 ; ConfigAssetName
-             ; lsv >= 2
-             (unit 'ConfigAssetName)]))
+             (>> ((logic-sig-version>= Step-VM) 2 "ConfigAssetName")
+                 (unit 'ConfigAssetName))]))
         ; transaction-array
         (λ (fi ai)
           (match fi
             [26 ; ApplicationArgs
-             #;(logic-sig-version>= 2 "ApplicationArgs")
-             (unit `(ApplicationArgs ,ai))]
+             (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
+                 (unit `(ApplicationArgs ,ai)))]
             [28 ; Accounts
-             #;(logic-sig-version>= 2 "Accounts")
-             (unit `(Accounts ,ai))]))
+             (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
+                 (unit `(Accounts ,ai)))]))
         ; load
         (λ (i)
           (>>= (get scratch-space)

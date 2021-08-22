@@ -107,12 +107,7 @@
                     asset-params-get
                     _ ; check-final
                     ) vm)
-  (define (logic-sig-version>= target-lsv info)
-    (>>= logic-sig-version
-         (λ (lsv)
-           (if (>= lsv target-lsv)
-             (unit)
-             (fail! "LogicSig version = ~a but need >= ~a for ~a" lsv target-lsv info)))))
+  (define lsv>= (logic-sig-version>= vm))
   (define (lookup-intcblock i)
     (>>= get-intcblock
          (λ (xs)
@@ -307,13 +302,13 @@
                      (jump offset)
                      continue)))))]
     [#x42 ; b
-     (>> (logic-sig-version>= 2 "b")
+     (>> (lsv>= 2 "b")
          (>>= (read-int16 rb) jump))]
     [#x43 ; return
-     (>> (logic-sig-version>= 2 "return")
+     (>> (lsv>= 2 "return")
          (>>= pop return!))]
     [#x44 ; assert
-     (>> (logic-sig-version>= 3 "assert")
+     (>> (lsv>= 3 "assert")
          (>>= pop
               (λ (x)
                 (>>= (is-zero x)
@@ -330,7 +325,7 @@
             (>> (push x)
                 (push x))))]
     [#x4a ; dup2
-     (>> (logic-sig-version>= 2 "dup2")
+     (>> (lsv>= 2 "dup2")
          (>>= pop
               (λ (b)
                 (>>= pop
@@ -340,10 +335,10 @@
                                (>> (push a)
                                    (push b)))))))))]
     [#x4c ; swap
-     (>> (logic-sig-version>= 3 "swap")
+     (>> (lsv>= 3 "swap")
          swap)]
     [#x4d ; select
-     (>> (logic-sig-version>= 3 "swap")
+     (>> (lsv>= 3 "swap")
          (>>= pop
               (λ (c)
                 (>>= pop
@@ -353,54 +348,54 @@
                               (>>= (is-zero c)
                                    (λ (zero?) (push (if zero? a b)))))))))))]
     [#x50 ; concat
-     (>> (logic-sig-version>= 2 "concat")
+     (>> (lsv>= 2 "concat")
          (stack-apply concat 2))]
     [#x52 ; substring3
-     (>> (logic-sig-version>= 2 "substring3")
+     (>> (lsv>= 2 "substring3")
          (stack-apply substring3 3))]
     [#x60 ; balance
-     (>> (logic-sig-version>= 2 "balance")
+     (>> (lsv>= 2 "balance")
          (>> (in-mode 'Application "balance")
              (stack-apply balance 1)))]
     [#x62 ; app_local_get
-     (>> (logic-sig-version>= 2 "app_local_get")
+     (>> (lsv>= 2 "app_local_get")
          (>> (in-mode 'Application "app_local_get")
              (stack-apply app-local-get 2)))]
     [#x64 ; app_global_get
-     (>> (logic-sig-version>= 2 "app_global_get")
+     (>> (lsv>= 2 "app_global_get")
          (>> (in-mode 'Application "app_global_get")
              (stack-apply app-global-get 1)))]
     [#x66 ; app_local_put
-     (>> (logic-sig-version>= 2 "app_local_put")
+     (>> (lsv>= 2 "app_local_put")
          (>> (in-mode 'Application "app_local_put")
              (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c)))))))))]
     [#x67 ; app_global_put
-     (>> (logic-sig-version>= 2 "app_global_put")
+     (>> (lsv>= 2 "app_global_put")
          (>> (in-mode 'Application "app_global_put")
              (>>= pop (λ (b) (>>= pop (λ (a) (app-global-put a b)))))))]
     [#x68 ; app_local_del
-     (>> (logic-sig-version>= 2 "app_local_del")
+     (>> (lsv>= 2 "app_local_del")
          (>> (in-mode 'Application "app_local_del")
              (>>= pop (λ (b) (>>= pop (λ (a) (app-local-del a b)))))))]
     [#x70 ; asset_holding_get
-     (>> (logic-sig-version>= 2 "asset_holding_get")
+     (>> (lsv>= 2 "asset_holding_get")
          (>> (in-mode 'Application "asset_holding_get")
              (>>= (read-uint8 rb)
                   (λ (fi) (>>= pop (λ (b) (>>= pop (λ (a) (asset-holding-get a b fi)))))))))]
     [#x71 ; asset_params_get
-     (>> (logic-sig-version>= 2 "asset_params_get")
+     (>> (lsv>= 2 "asset_params_get")
          (>> (in-mode 'Application "asset_params_get")
              (>>= (read-uint8 rb)
                   (λ (fi) (>>= pop (λ (a) (asset-params-get a fi)))))))]
     [#x78 ; min_balance
-     (>> (logic-sig-version>= 3 "min_balance")
+     (>> (lsv>= 3 "min_balance")
          (>> (in-mode 'Application "min_balance")
              (stack-apply min-balance 1)))]
     [#x80 ; pushbytes
-     (>> (logic-sig-version>= 3 "pushbytes")
+     (>> (lsv>= 3 "pushbytes")
          (>>= (read-bytes rb) push))]
     [#x81 ; pushint
-     (>> (logic-sig-version>= 3 "pushint")
+     (>> (lsv>= 3 "pushint")
          (>>= (read-varuint rb) push))]
     [bc
      (display "0x")
@@ -464,5 +459,17 @@
            (execute vm))
       check-final))
 
+(define (logic-sig-version>= vm)
+  (match-let ([(MonadPlus (Monad unit >>= _) _ _) (VM-MonadPlus vm)]
+              [logic-sig-version (VM-logic-sig-version vm)]
+              [fail! (VM-fail! vm)])
+    (λ (target-lsv info)
+      (>>= logic-sig-version
+           (λ (lsv)
+             (if (>= lsv target-lsv)
+               (unit)
+               (fail! "LogicSig version = ~a but need >= ~a for ~a" lsv target-lsv info)))))))
+
 (provide VM
-         step)
+         step
+         logic-sig-version>=)
