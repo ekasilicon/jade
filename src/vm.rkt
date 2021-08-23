@@ -316,7 +316,7 @@
                 (>>= (is-zero x)
                      (λ (fail?)
                        (if fail?
-                         (panic "assert: ~v is zero" x)
+                         (panic "assert: ~v" x)
                          continue))))))]
     [#x48 ; pop
      (>> pop

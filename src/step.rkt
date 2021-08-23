@@ -65,8 +65,12 @@
 (define-syntax-rule (set key val)
   (λ (st) (list (underway (list) (hash-set st 'key val)))))
 ; update : key f -> Step ()
-(define-syntax-rule (update key f)
-  (λ (st) (list (underway (list) (hash-update st 'key f)))))
+(define-syntax update
+  (syntax-rules ()
+    [(_ key f)
+     (λ (st) (list (underway (list) (hash-update st 'key f))))]
+    [(_ key f iv)
+     (λ (st) (list (underway (list) (hash-update st 'key f iv))))]))
 
 (define Step-MonadPlus
   (MonadPlus Step-Monad
@@ -88,6 +92,71 @@
 ; instance VM <hash-thing>
 (define Step-VM
   (match-let ([(MonadPlus (Monad unit >>= >>) mzero mplus) Step-MonadPlus])
+    (define (interpretation #:assume assume #:reject reject)
+      (match-lambda
+        [`(¬ ,c) (reject c)]
+        [c       (assume c)]))
+    (define interpretations
+      (list
+       #;
+       (interpretation
+        #:assume
+        (match-lambda
+          [`(= OnCompletion ,oc)
+           (>>= (get OnCompletion #f)
+                (match-lambda
+                  [#f
+                   (set OnCompletion `(known ,oc))]
+                  [`(known ,oc₀)
+                   (assume `(= ,oc₀ ,oc))]
+                  [`(eliminated ,ocs)
+                   (for/fold ([m (set OnCompletion `(known ,oc))])
+                             ([oc₀ (in-set ocs)])
+                     (>> (reject `(= ,oc ,oc₀))
+                         m))]))]
+          [_ #f])
+        #:reject
+        (match-lambda
+             [`(= OnCompletion ,oc)
+              (>>= (get OnCompletion #f)
+                   (match-lambda
+                     [#f
+                      (set OnCompletion `(eliminated ,(r:set oc)))]
+                     [`(known ,oc₀)
+                      (reject `(= ,oc₀ ,oc))]
+                     [`(eliminated ,ocs)
+                      (set OnCompletion `(eliminated ,(r:set-add ocs oc)))]))
+              (update OnCompletion
+                      (match-lambda
+                        [`(known ,oc₀)
+                         `(known ,oc₀)]
+                        [`(eliminated ,oc₀)
+                         (let* ([oc₀ (r:set-add oc₀ oc)]
+                                [occ (for/fold ([ocs (r:set 0 1 2 4 5)])
+                                               ([oc (r:in-set oc₀)])
+                                       (r:set-remove ocs oc))])
+                           (if (= (r:set-count occ) 1)
+                             `(known ,(r:set-first occ))
+                             `(eliminated ,oc₀)))])
+                      `(eliminated ,(r:set)))]
+             [_ #f]))
+       (interpretation
+        #:assume
+        (match-lambda
+          [`(< ,x ,x)
+           mzero]
+          [_ #f])
+        #:reject
+        (match-lambda
+          [`(< ,x ,x)
+           (unit)]
+          [_ #f]))
+       #;
+       (interpretation
+        #:assume
+        (match-lambda
+          [`(= (ApplicationArgs))]))))
+    
     (define (push x) (update stack (λ (stk) (cons x stk))))
     (define pop
       (>>= (get stack)
@@ -97,16 +166,16 @@
                   (unit x))]
              [(list)
               (panic "tried to pop an empty stack")])))
-    (define affirm
+    (define assume
       (match-lambda
         [`(¬ ,c)
          (reject c)]
         [`(∧ ,c₀ ,c₁)
-         (>> (affirm c₀)
-             (affirm c₁))]
+         (>> (assume c₀)
+             (assume c₁))]
         [`(∨ ,c₀ ,c₁)
-         (mplus (affirm c₀)
-                (affirm c₁))]
+         (mplus (assume c₀)
+                (assume c₁))]
         [(? exact-nonnegative-integer? n)
          (if (zero? n)
            mzero
@@ -123,8 +192,13 @@
             (if (= x₀ x₁)
               (unit)
               mzero)]
+           [(equal? x₀ x₁)
+            (unit)]
            [else
             (failure-cont)])]
+        [c
+         (or (ormap (λ (i) (i c)) interpretations)
+             (failure-cont))]
         [c
          (>>= (get path-condition)
               (λ (pc)
@@ -134,7 +208,7 @@
     (define reject
       (match-lambda
         [`(¬ ,c)
-         (affirm c)]
+         (assume c)]
         [`(∨ ,c₀ ,c₁)
          (>> (reject c₀)
              (reject c₁))]
@@ -157,8 +231,13 @@
             (if (= x₀ x₁)
               mzero
               (unit))]
+           [(equal? x₀ x₁)
+            mzero]
            [else
             (failure-cont)])]
+        [c
+         (or (ormap (λ (i) (i `(¬ ,c))) interpretations)
+             (failure-cont))]
         [c
          (>>= (get path-condition)
               (λ (pc)
@@ -167,6 +246,23 @@
                   (update path-condition (λ (pc) (r:set-add pc `(¬ ,c)))))))]))
     (define (log msg)
       (update execution-log (λ (msgs) (cons msg msgs))))
+    (define <-reduce
+      (match-lambda
+        [`(¬ ,c)
+         `(¬ ,(<-reduce c))]
+        [`(∧ ,c₀ ,c₁)
+         `(∧ ,(<-reduce c₀)
+             ,(<-reduce c₁))]
+        [`(∨ ,c₀ ,c₁)
+         `(∨ ,(<-reduce c₀)
+             ,(<-reduce c₁))]
+        [`(> ,x ,y)
+         `(< ,y ,x)]
+        [`(<= ,x ,y)
+         (<-reduce `(>= ,y ,x))]
+        [`(>= ,x ,y)
+         `(¬ (< ,x ,y))]
+        [c c]))
     (VM Step-MonadPlus Step-ReadByte
         ; panic
         panic
@@ -175,6 +271,7 @@
         ; logic-sig-version
         (get logic-sig-version)
         ; in-mode
+        ; could (assume `(= ApplicationMode ,target-mode)) and work the metalogic out with a custom interpretation
         (λ (target-mode info)
           (>>= (get mode #f)
                (match-lambda
@@ -216,10 +313,10 @@
         (λ (x) (unit `(itob ,x)))
         ; btoi
         (λ (x)
-          (mplus (>> (affirm `(< 8 (len ,x)))
-                     (panic "btoi: input greater than 8 bytes"))
-                 (>> (reject `(< 8 (len ,x)))
-                     (unit `(btoi ,x)))))
+          (mplus (>> (assume (<-reduce `(<= (len ,x) 8)))
+                     (unit `(btoi ,x)))
+                 (>> (reject (<-reduce `(<= (len ,x) 8)))
+                     (panic "btoi: input greater than 8 bytes"))))
         ; %
         (λ (x y) (unit `(% ,x ,y)))
         ; mulw
@@ -244,7 +341,7 @@
                         (push `(lo (remainder ,dend ,isor))))))))
         ; is-zero
         (λ (c)
-          (mplus (>> (affirm c)
+          (mplus (>> (assume c)
                      (unit #f))
                  (>> (reject c)
                      (unit #t))))
@@ -266,8 +363,12 @@
         (λ (x y) (unit `(concat ,x ,y)))
         ; substring3
         (λ (a b c)
-          (mplus (panic "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c))
-                 (unit `(substring3 ,a ,b ,c))))
+          (mplus (>> (assume (<-reduce `(∧ (<= ,b ,c)
+                                           (<= ,c (len ,a)))))
+                     (unit `(substring3 ,a ,b ,c)))
+                 (>> (reject (<-reduce `(∧ (<= ,b ,c)
+                                           (<= ,c (len ,a)))))
+                     (panic "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c)))))
         ; transaction
         (match-lambda
           [0  ; Sender
@@ -361,7 +462,7 @@
                                    (unit `(app-local-get ,acct ,key))]
                                   [(cons `(put ,put-acct ,put-key ,val)
                                          al)
-                                   (mplus (>> (affirm `(∧ (= ,acct ,put-acct)
+                                   (mplus (>> (assume `(∧ (= ,acct ,put-acct)
                                                           (= ,key  ,put-key)))
                                               (unit val))
                                           (>> (reject `(∧ (= ,acct ,put-acct)
@@ -382,7 +483,7 @@
                                    (unit `(app-global-get ,key))]
                                   [(cons `(put ,put-key ,val)
                                          ag)
-                                   (mplus (>> (affirm `(= ,key ,put-key))
+                                   (mplus (>> (assume `(= ,key ,put-key))
                                               (unit val))
                                           (>> (reject `(= ,key ,put-key))
                                               (lookup ag)))])])
@@ -392,25 +493,23 @@
           (update app-global (λ (ag) (cons `(put ,key ,val) ag))))
         ; app-global-get-ex
         (λ (app-id key)
-          (>>= (unit 42)
-               (match-lambda
-                 [42
-                  (>> (push `(app-global ,app-id ,key))
-                      (push `(app-global-exists ,app-id ,key)))])))
+          (>> (push `(app-global ,app-id ,key))
+              (push `(app-global-exists ,app-id ,key))))
         ; asset-holding-get
         (λ (acct asset x)
-          (>>= (unit 42)
-               (match-lambda
-                 [42
-                  (>> (push `(asset-holding-get ,acct ,asset ,x))
-                      (push `(asset-holding-get-exists ,acct ,asset ,x)))])))
+          (>>= (match x
+                 [0 (unit 'AssetBalance)]
+                 [1 (unit 'AssetFrozen)])
+               (λ (f)
+                 (>> (push `(asset-holding-get ,acct ,asset ,f))
+                     (push `(asset-holding-get-exists ,acct ,asset ,f))))))
         ; asset-params-get
         (λ (asset x)
-          (>>= (unit 42)
-               (match-lambda
-                 [42
-                  (>> (push `(asset-params-get ,asset ,x))
-                      (push `(asset-params-get-exists ,asset ,x)))])))
+          (>>= (match x
+                 [3 (unit 'AssetUnitName)])
+               (λ (f)
+                 (>> (push `(asset-params-get ,asset ,f))
+                     (push `(asset-params-get-exists ,asset ,f))))))
         ; check-final
         (>>= (get bytecode)
              (λ (bc)
