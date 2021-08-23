@@ -97,28 +97,6 @@
                   (unit x))]
              [(list)
               (panic "tried to pop an empty stack")])))
-    (define add-affirmed
-      (match-lambda
-        [`(∧ ,c₀ ,c₁)
-         (>> (add-affirmed c₀)
-             (add-affirmed c₁))]
-        [`(¬ ,c)
-         (add-rejected c)]
-        [c
-         #;
-         (pretty-print c)
-         (update path-condition (λ (pc) (r:set-add pc c)))]))
-    (define add-rejected
-      (match-lambda
-        [`(̣∨ ,c₀ ,c₁)
-         (>> (add-rejected c₀)
-             (add-rejected c₁))]
-        [`(¬ ,c)
-         (add-affirmed c)]
-        [c
-         #;
-         (pretty-print `(¬ ,c))
-         (update path-condition (λ (pc) (r:set-add pc `(¬ ,c))))]))
     (define affirm
       (match-lambda
         [`(¬ ,c)
@@ -126,17 +104,33 @@
         [`(∧ ,c₀ ,c₁)
          (>> (affirm c₀)
              (affirm c₁))]
+        [`(∨ ,c₀ ,c₁)
+         (mplus (affirm c₀)
+                (affirm c₁))]
+        [(? exact-nonnegative-integer? n)
+         (if (zero? n)
+           mzero
+           (unit))]
         [`(= ,x₀ ,x₁)
          (cond
            [(and (bytes? x₀)
                  (bytes? x₁))
             (if (bytes=? x₀ x₁)
               (unit)
-              (λ (st) (list)))]
+              mzero)]
+           [(and (exact-nonnegative-integer? x₀)
+                 (exact-nonnegative-integer? x₁))
+            (if (= x₀ x₁)
+              (unit)
+              mzero)]
            [else
             (failure-cont)])]
         [c
-         (add-affirmed c)]))
+         (>>= (get path-condition)
+              (λ (pc)
+                (if (r:set-member? pc `(¬ ,c))
+                  mzero
+                  (update path-condition (λ (pc) (r:set-add pc c))))))]))
     (define reject
       (match-lambda
         [`(¬ ,c)
@@ -144,17 +138,33 @@
         [`(∨ ,c₀ ,c₁)
          (>> (reject c₀)
              (reject c₁))]
+        [`(∧ ,c₀ ,c₁)
+         (mplus (reject c₀)
+                (reject c₁))]
+        [(? exact-nonnegative-integer? n)
+         (if (zero? n)
+           (unit)
+           mzero)]
         [`(= ,x₀ ,x₁)
          (cond
            [(and (bytes? x₀)
                  (bytes? x₁))
             (if (bytes=? x₀ x₁)
-              (λ (st) (list))
+              mzero
+              (unit))]
+           [(and (exact-nonnegative-integer? x₀)
+                 (exact-nonnegative-integer? x₁))
+            (if (= x₀ x₁)
+              mzero
               (unit))]
            [else
             (failure-cont)])]
         [c
-         (add-rejected c)]))
+         (>>= (get path-condition)
+              (λ (pc)
+                (if (r:set-member? pc c)
+                  mzero
+                  (update path-condition (λ (pc) (r:set-add pc `(¬ ,c)))))))]))
     (define (log msg)
       (update execution-log (λ (msgs) (cons msg msgs))))
     (VM Step-MonadPlus Step-ReadByte
