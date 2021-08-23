@@ -20,7 +20,8 @@
           'scratch-space (hasheqv)
           'path-condition (r:set)
           'app-local (list) ; at best a map, at worst a sequence of puts
-          'app-global (list)))
+          'app-global (list)
+          'execution-log (list)))
 
 (struct underway (xs state))
 (struct returned (code))
@@ -49,7 +50,7 @@
 
 (define ((return x) st)
   (list (returned x)))
-(define ((fail! template . args) st)
+(define ((panic template . args) st)
   (list (failure! (apply format template args))))
 
 
@@ -80,7 +81,7 @@
                      (>>= (get pc)
                           (λ (pc)
                             (if (>= pc (bytes-length bc))
-                              (fail! "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
+                              (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
                               (>> (update pc add1)
                                   (unit (bytes-ref bc pc)))))))))))
 
@@ -95,10 +96,70 @@
               (>> (set stack stk)
                   (unit x))]
              [(list)
-              (fail! "tried to pop an empty stack")])))
+              (panic "tried to pop an empty stack")])))
+    (define add-affirmed
+      (match-lambda
+        [`(∧ ,c₀ ,c₁)
+         (>> (add-affirmed c₀)
+             (add-affirmed c₁))]
+        [`(¬ ,c)
+         (add-rejected c)]
+        [c
+         #;
+         (pretty-print c)
+         (update path-condition (λ (pc) (r:set-add pc c)))]))
+    (define add-rejected
+      (match-lambda
+        [`(̣∨ ,c₀ ,c₁)
+         (>> (add-rejected c₀)
+             (add-rejected c₁))]
+        [`(¬ ,c)
+         (add-affirmed c)]
+        [c
+         #;
+         (pretty-print `(¬ ,c))
+         (update path-condition (λ (pc) (r:set-add pc `(¬ ,c))))]))
+    (define affirm
+      (match-lambda
+        [`(¬ ,c)
+         (reject c)]
+        [`(∧ ,c₀ ,c₁)
+         (>> (affirm c₀)
+             (affirm c₁))]
+        [`(= ,x₀ ,x₁)
+         (cond
+           [(and (bytes? x₀)
+                 (bytes? x₁))
+            (if (bytes=? x₀ x₁)
+              (unit)
+              (λ (st) (list)))]
+           [else
+            (failure-cont)])]
+        [c
+         (add-affirmed c)]))
+    (define reject
+      (match-lambda
+        [`(¬ ,c)
+         (affirm c)]
+        [`(∨ ,c₀ ,c₁)
+         (>> (reject c₀)
+             (reject c₁))]
+        [`(= ,x₀ ,x₁)
+         (cond
+           [(and (bytes? x₀)
+                 (bytes? x₁))
+            (if (bytes=? x₀ x₁)
+              (λ (st) (list))
+              (unit))]
+           [else
+            (failure-cont)])]
+        [c
+         (add-rejected c)]))
+    (define (log msg)
+      (update execution-log (λ (msgs) (cons msg msgs))))
     (VM Step-MonadPlus Step-ReadByte
-        ; fail!
-        fail!
+        ; panic
+        panic
         ; return!
         return
         ; logic-sig-version
@@ -112,7 +173,7 @@
                  [mode
                   (if (eq? mode target-mode)
                     (unit)
-                    (fail! "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))
+                    (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))
         ; get-pc
         (get pc)
         ; set-pc
@@ -145,8 +206,10 @@
         (λ (x) (unit `(itob ,x)))
         ; btoi
         (λ (x)
-          (mplus (fail! "~v longer than 8 bytes" x)
-                 (unit `(btoi ,x))))
+          (mplus (>> (affirm `(< 8 (len ,x)))
+                     (panic "btoi: input greater than 8 bytes"))
+                 (>> (reject `(< 8 (len ,x)))
+                     (unit `(btoi ,x)))))
         ; %
         (λ (x y) (unit `(% ,x ,y)))
         ; mulw
@@ -171,55 +234,10 @@
                         (push `(lo (remainder ,dend ,isor))))))))
         ; is-zero
         (λ (c)
-          (define ((add-path-condition c) pc)
-            (let loop ([c c]
-                       [pc pc])
-              (match c
-                [`(∧ ,c₀ ,c₁)
-                 (loop c₁ (loop c₀ pc))]
-                [`(¬ (∨ ,c₀ ,c₁))
-                 (loop `(¬ ,c₁) (loop `(¬ ,c₀) pc))]
-                [`(¬ (&& ,c₀ ,c₁))
-                 (r:set-add pc `(∨ (¬ ,c₀) (¬ ,c₁)))]
-                [c
-                 (r:set-add pc c)])))
-          (define affirm-path-condition
-            (match-lambda
-              [`(¬ ,c)
-               (negate-path-condition c)]
-              [c
-               (add-path-condition c)]))
-          (define negate-path-condition
-            (match-lambda
-              [`(¬ ,c)
-               (affirm-path-condition c)]
-              [c
-               (add-path-condition `(¬ ,c))]))
-          (define (verify m c)
-            (>>= (get path-condition)
-                 (λ (pc)
-                   (cond
-                     [(r:set-empty? pc)
-                      ; no constraints yet
-                      m]
-                     [else
-                      m
-                      #;
-                      (pretty-print pc)
-                      #;
-                      (displayln "---")
-                      #;
-                      (pretty-print c)
-                      #;
-                      (displayln "Can the above condition hold?")
-                      #;
-                      (if (read) m mzero)]))))
-          (mplus (verify (>> (update path-condition (negate-path-condition c))
-                             (unit #t))
-                         `(¬ ,c))
-                 (verify (>> (update path-condition (affirm-path-condition c))
-                             (unit #f))
-                         c)))
+          (mplus (>> (affirm c)
+                     (unit #f))
+                 (>> (reject c)
+                     (unit #t))))
         ; &&
         (λ (x y) (unit `(∧ ,x ,y)))
         ; ||
@@ -238,7 +256,7 @@
         (λ (x y) (unit `(concat ,x ,y)))
         ; substring3
         (λ (a b c)
-          (mplus (fail! "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c))
+          (mplus (panic "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c))
                  (unit `(substring3 ,a ,b ,c))))
         ; transaction
         (match-lambda
@@ -255,9 +273,15 @@
            (unit 'OnCompletion)]
           [27 ; NumAppArgs
            (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
-               (unit 'NumAppArgs))])
+               (unit 'NumAppArgs))]
+          [32 ; 
+           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+               (unit 'RekeyTo))])
         ; global
         (match-lambda
+          [3 ; ZeroAddress
+           (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
+               (unit 'ZeroAddress))]
           [4 ; GroupSize
            (unit 'GroupSize)]
           [6 ; Round
@@ -265,7 +289,8 @@
                (unit 'Round))]
           [7 ; LatestTimestamp
            (>> ((logic-sig-version>= Step-VM) 2 "LatestTimestamp")
-               (unit 'LatestTimestamp))]
+               (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
+                   (unit 'LatestTimestamp)))]
           [9 ; CreatorAddress
            ; "Address of the creator of the current application. Fails if no such application is executing."
            (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
@@ -275,18 +300,26 @@
           (match fi
             [0  ; Sender
              (unit `(txn ,ti Sender))]
+            [1  ; Fee
+             (unit `(txn ,ti Fee))]
             [7  ; Receiver
              (unit `(txn ,ti Receiver))]
             [8  ; Amount
              (unit `(txn ,ti Amount))]
+            [9  ; CloseRemainderTo
+             (unit `(txn ,ti CloseRemainderTo))]
             [16 ; TypeEnum
              (unit `(txn ,ti TypeEnum))]
             [17 ; XferAsset
              (unit `(txn ,ti XferAsset))]
             [18 ; AssetAmount
              (unit `(txn ,ti AssetAmount))]
+            [19 ; AssetSender
+             (unit `(txn ,ti AssetSender))]
             [20 ; AssetReceiver
              (unit `(txn ,ti AssetReceiver))]
+            [21 ; AssetCloseTo
+             (unit `(txn ,ti AssetCloseTo))]
             [38 ; ConfigAssetName
              (>> ((logic-sig-version>= Step-VM) 2 "ConfigAssetName")
                  (unit 'ConfigAssetName))]))
@@ -311,29 +344,20 @@
         ; min-balance
         (λ (acct) (unit `(min-balance ,acct)))
         ; app-local-get
-        (λ (aid key)
+        (λ (acct key)
           (>>= (get app-local)
-               (match-lambda
-                 [(list)
-                  (unit `(app-local-get ,aid ,key))]
-                 [al
-                  (match `(app-local-get ,aid ,key)
-                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a2"))))
-                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a2")))))]
-                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a1"))))
-                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"a1")))))]
-                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"lt"))))
-                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (app-local-get 0 #"lt")))))]
-                    ['(app-local-get 0 #"c2")
-                     (unit '(app-local-get 0 #"c2"))]
-                    ['(app-local-get 0 #"p2")
-                     (unit '(app-local-get 0 #"p2"))]
-                    ['(app-local-get 1 (concat (concat Sender #"e") (itob (txn 2 XferAsset))))
-                     (unit '(app-local-get 1 (concat (concat Sender #"e") (itob (txn 2 XferAsset)))))]
-                    [_
-                     (pretty-print al)
-                     (pretty-print `(app-local-get ,aid ,key))
-                     (failure-cont)])])))
+               (letrec ([lookup (match-lambda
+                                  [(list)
+                                   (unit `(app-local-get ,acct ,key))]
+                                  [(cons `(put ,put-acct ,put-key ,val)
+                                         al)
+                                   (mplus (>> (affirm `(∧ (= ,acct ,put-acct)
+                                                          (= ,key  ,put-key)))
+                                              (unit val))
+                                          (>> (reject `(∧ (= ,acct ,put-acct)
+                                                          (= ,key  ,put-key)))
+                                              (lookup al)))])])
+                 lookup)))
         ; app-local-put
         (λ (acct key val)
           (update app-local (λ (al) (cons `(put ,acct ,key ,val) al))))
@@ -343,21 +367,26 @@
         ; app-global-get
         (λ (key)
           (>>= (get app-global)
-               (match-lambda
-                 [(list) (unit `(app-global-get ,key))]
-                 [ag
-                  (match `(app-global-get ,key)
-                    ['(app-global-get #"End round")
-                     (unit '(app-global-get #"End round"))]
-                    ['(app-global-get #"Duration")
-                     (unit '(app-global-get #"Duration"))]
-                    [_
-                     (pretty-print ag)
-                     (pretty-print `(app-global-get ,key))
-                     (failure-cont)])])))
+               (letrec ([lookup (match-lambda
+                                  [(list)
+                                   (unit `(app-global-get ,key))]
+                                  [(cons `(put ,put-key ,val)
+                                         ag)
+                                   (mplus (>> (affirm `(= ,key ,put-key))
+                                              (unit val))
+                                          (>> (reject `(= ,key ,put-key))
+                                              (lookup ag)))])])
+                 lookup)))
         ; app-global-put
         (λ (key val)
           (update app-global (λ (ag) (cons `(put ,key ,val) ag))))
+        ; app-global-get-ex
+        (λ (app-id key)
+          (>>= (unit 42)
+               (match-lambda
+                 [42
+                  (>> (push `(app-global ,app-id ,key))
+                      (push `(app-global-exists ,app-id ,key)))])))
         ; asset-holding-get
         (λ (acct asset x)
           (>>= (unit 42)
@@ -380,9 +409,9 @@
                       (if (= pc (bytes-length bc))
                         (>>= (get stack)
                              (match-lambda
-                               [(list) (fail! "stack is empty at end of program")]
+                               [(list) (panic "stack is empty at end of program")]
                                [(list x) (return x)]
-                               [_ (fail! "stack has more than one value at end of program")]))
+                               [_ (panic "stack has more than one value at end of program")]))
                         (unit)))))))))
 
 (module+ main

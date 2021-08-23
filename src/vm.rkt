@@ -4,7 +4,7 @@
          "read-byte.rkt")
 
 (struct VM (MonadPlus ReadByte
-                      fail!
+                      panic
                       return!
                       logic-sig-version
                       in-mode
@@ -50,6 +50,7 @@
                       app-local-del
                       app-global-get
                       app-global-put
+                      app-global-get-ex
                       asset-holding-get
                       asset-params-get
                       check-final))
@@ -57,7 +58,7 @@
 ; execute : VM m s => byte → m ()
 (define (execute vm)
   (match-define (VM (MonadPlus (Monad unit >>= >>) _ _) rb
-                    fail!
+                    panic
                     return!
                     logic-sig-version
                     in-mode
@@ -103,6 +104,7 @@
                     app-local-del
                     app-global-get
                     app-global-put
+                    app-global-get-ex
                     asset-holding-get
                     asset-params-get
                     _ ; check-final
@@ -113,33 +115,33 @@
          (λ (xs)
            (if (< i (length xs))
              (unit (list-ref xs i))
-             (fail! "intcblock has ~a ints but index ~a requested" (length xs) i)))))
+             (panic "intcblock has ~a ints but index ~a requested" (length xs) i)))))
   (define (lookup-bytecblock i)
     (>>= get-bytecblock
          (λ (bss)
            (if (< i (length bss))
              (unit (list-ref bss i))
-             (fail! "bytecblock has ~a bytes but index ~a requested" (length bss) i)))))
+             (panic "bytecblock has ~a bytes but index ~a requested" (length bss) i)))))
   (define continue (unit (list)))
   (define (jump offset)
     (>>= logic-sig-version
          (λ (lsv)
            (if (and (< offset 0)
                     (< lsv 4))
-             (fail! "cannot jump backwards (offset ~a) in LogicSig version ~a < 4" offset lsv)
+             (panic "cannot jump backwards (offset ~a) in LogicSig version ~a < 4" offset lsv)
              (>>= get-pc (λ (pc) (goto (+ pc offset))))))))
   (define (goto pc)
     (if (< pc 0)
-      (fail! "cannot go to negative counter ~a" pc)
+      (panic "cannot go to negative counter ~a" pc)
       (>>= get-bytecode
            (λ (bc)
              (if (> pc (bytes-length bc))
-               (fail! "cannot go to ~a past bytecode of length ~a" pc (bytes-length bc))
+               (panic "cannot go to ~a past bytecode of length ~a" pc (bytes-length bc))
                (>>= logic-sig-version
                     (λ (lsv)
                       (if (and (= pc (bytes-length bc))
                                (< lsv 2))
-                        (fail! "cannot go to end of bytecode (length ~a) in version ~a < 2" (bytes-length bc) lsv)
+                        (panic "cannot go to end of bytecode (length ~a) in version ~a < 2" (bytes-length bc) lsv)
                         (set-pc pc)))))))))
   (define (stack-apply f arity)
     (>>= (>>= (let loop ([n arity]
@@ -158,7 +160,7 @@
                       (push a)))))))
   (match-lambda
     [#x00 ; err
-     (fail! "err")]
+     (panic "err")]
     [#x08 ; +
      (stack-apply vm+ 2)]
     [#x09 ; -
@@ -171,7 +173,7 @@
                    (>>= (is-zero b)
                         (λ (zero?)
                           (if zero?
-                            (fail! "/ by 0")
+                            (panic "/ by 0")
                             (>>= (vm/ a b) push))))))))]
     [#x0b ; *
      (stack-apply vm* 2)]
@@ -212,7 +214,7 @@
                    (>>= (is-zero b)
                         (λ (zero?)
                           (if zero?
-                            (fail! "% by 0")
+                            (panic "% by 0")
                             (>>= (% a b) push))))))))]
     [#x1c ; ~
      (stack-apply vm~ 1)]
@@ -314,7 +316,7 @@
                 (>>= (is-zero x)
                      (λ (fail?)
                        (if fail?
-                         (fail! "assert of ~v failed" x)
+                         (panic "assert: ~v is zero" x)
                          continue))))))]
     [#x48 ; pop
      (>> pop
@@ -365,6 +367,10 @@
      (>> (lsv>= 2 "app_global_get")
          (>> (in-mode 'Application "app_global_get")
              (stack-apply app-global-get 1)))]
+    [#x65 ; app_global_get_ex
+     (>> (lsv>= 2 "app_global_get")
+         (>> (in-mode 'Application "app_global_get_ex")
+             (>>= pop (λ (b) (>>= pop (λ (a) (app-global-get-ex a b)))))))]
     [#x66 ; app_local_put
      (>> (lsv>= 2 "app_local_put")
          (>> (in-mode 'Application "app_local_put")
@@ -405,7 +411,7 @@
 ; step : VM m s => m ()
 (define (step vm)
   (match-define (VM (MonadPlus (Monad _ >>= >>) _ _) rb
-                    _ ; fail!
+                    _ ; panic
                     _ ; return!
                     _ ; logic-sig-version
                     _ ; in-mode
@@ -451,6 +457,7 @@
                     _ ; app-local-del
                     _ ; app-global-get
                     _ ; app-global-put
+                    _ ; app-global-get-ex
                     _ ; asset-holding-get
                     _ ; asset-params-get
                     check-final
@@ -462,13 +469,13 @@
 (define (logic-sig-version>= vm)
   (match-let ([(MonadPlus (Monad unit >>= _) _ _) (VM-MonadPlus vm)]
               [logic-sig-version (VM-logic-sig-version vm)]
-              [fail! (VM-fail! vm)])
+              [panic (VM-panic vm)])
     (λ (target-lsv info)
       (>>= logic-sig-version
            (λ (lsv)
              (if (>= lsv target-lsv)
                (unit)
-               (fail! "LogicSig version = ~a but need >= ~a for ~a" lsv target-lsv info)))))))
+               (panic "LogicSig version = ~a but need >= ~a for ~a" lsv target-lsv info)))))))
 
 (provide VM
          step
