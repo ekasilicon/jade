@@ -89,6 +89,16 @@
                               (>> (update pc add1)
                                   (unit (bytes-ref bc pc)))))))))))
 
+(define-match-expander uint64
+  (syntax-rules ()
+    [(_ x)
+     (? exact-nonnegative-integer? (? (λ (y) (< y (expt 2 64))) x))]))
+
+(define-match-expander bytes
+  (syntax-rules ()
+    [(_ x)
+     (? bytes? x)]))
+
 ; instance VM <hash-thing>
 (define Step-VM
   (match-let ([(MonadPlus (Monad unit >>= >>) mzero mplus) Step-MonadPlus])
@@ -98,6 +108,7 @@
         [c       (assume c)]))
     (define interpretations
       (list
+       ; come up with a generic interpretation for enumerations (small finite sets)
        #;
        (interpretation
         #:assume
@@ -145,6 +156,10 @@
         (match-lambda
           [`(< ,x ,x)
            mzero]
+          [`(< ,(uint64 x) (exp 2 64))
+           (if (< x (expt 2 64))
+             (unit)
+             mzero)]
           [_ #f])
         #:reject
         (match-lambda
@@ -244,25 +259,36 @@
                 (if (r:set-member? pc c)
                   mzero
                   (update path-condition (λ (pc) (r:set-add pc `(¬ ,c)))))))]))
-    (define (log msg)
-      (update execution-log (λ (msgs) (cons msg msgs))))
-    (define <-reduce
+    (define <rw
       (match-lambda
         [`(¬ ,c)
-         `(¬ ,(<-reduce c))]
+         `(¬ ,(<rw c))]
         [`(∧ ,c₀ ,c₁)
-         `(∧ ,(<-reduce c₀)
-             ,(<-reduce c₁))]
+         `(∧ ,(<rw c₀)
+             ,(<rw c₁))]
         [`(∨ ,c₀ ,c₁)
-         `(∨ ,(<-reduce c₀)
-             ,(<-reduce c₁))]
+         `(∨ ,(<rw c₀)
+             ,(<rw c₁))]
         [`(> ,x ,y)
          `(< ,y ,x)]
         [`(<= ,x ,y)
-         (<-reduce `(>= ,y ,x))]
+         (<rw `(>= ,y ,x))]
         [`(>= ,x ,y)
          `(¬ (< ,x ,y))]
         [c c]))
+    (define (sif cnd thn els)
+      (mplus (>> (assume cnd)
+                 thn)
+             (>> (reject cnd)
+                 els)))
+    (define (uint64-op2 s c x y)
+      (match* (x y)
+        [((uint64 x) (uint64 y))
+         (unit (c x y))]
+        [(_ _)
+         (unit (list s x y))]))
+    (define (log template . args)
+      (update execution-log (λ (msgs) (cons (apply format template args) msgs))))
     (VM Step-MonadPlus Step-ReadByte
         ; panic
         panic
@@ -300,12 +326,26 @@
         ; pop
         pop
         ; +
-        (λ (x y) (unit `(+ ,x ,y)))
+        (λ (x y)
+          (>>= (uint64-op2 '+ + x y)
+               (λ (z)
+                 (>> (log "using symbolic constant (exp 2 64)")
+                     (sif (<rw `(< ,z (exp 2 64)))
+                          (unit z)
+                          (panic "~a + ~a overflows" x y))))))
         ; -
-        (λ (x y) (unit `(- ,x ,y)))
+        (λ (x y)
+          (sif (<rw `(<= ,x ,y))
+               (uint64-op2 '- - x y)
+               (panic "-: ~a > ~a" y x)))
         ; /
-        (λ (x y) (unit `(/ ,x ,y)))
+        ; XXX handle divide by zero
+        (λ (x y)
+          (sif y
+               (unit `(/ ,x ,y))
+               ) )
         ; *
+        ; XXX handle overflow
         (λ (x y) (unit `(* ,x ,y)))
         ; len
         (λ (x) (unit `(len ,x)))
@@ -313,38 +353,49 @@
         (λ (x) (unit `(itob ,x)))
         ; btoi
         (λ (x)
-          (mplus (>> (assume (<-reduce `(<= (len ,x) 8)))
+          (mplus (>> (assume (<rw `(<= (len ,x) 8)))
                      (unit `(btoi ,x)))
-                 (>> (reject (<-reduce `(<= (len ,x) 8)))
+                 (>> (reject (<rw `(<= (len ,x) 8)))
                      (panic "btoi: input greater than 8 bytes"))))
         ; %
+        ; XXX handle % by zero
         (λ (x y) (unit `(% ,x ,y)))
         ; mulw
         (λ (a b)
-          (>> (push `(hi (mulw ,a ,b)))
-              (push `(lo (mulw ,a ,b)))))
+          (cond
+            [(and (exact-nonnegative-integer? a)
+                  (exact-nonnegative-integer? b))
+             (let ([c (* a b)])
+               (>> (push (arithmetic-shift c -64))
+                   (push (bitwise-and c (sub1 (expt 2 64))))))]
+            [else
+             (>> (push `(hi (mulw ,a ,b)))
+                 (push `(lo (mulw ,a ,b))))]))
         ; addw
+        ; XXX handle literals
         (λ (a b)
           (>> (push `(hi (addw ,a ,b)))
               (push `(lo (addw ,a ,b)))))
         ; divmodw
         (λ (a b c d)
           (let ([dend (match* (a b)
+                        [((? exact-nonnegative-integer?) (? exact-nonnegative-integer?))
+                         (bitwise-ior (* a (expt 2 64)) b)]
                         [(`(hi ,x) `(lo ,x)) x]
                         [(x y) `(uint128 ,x ,y)])]
                 [isor (match* (c d)
+                        [((? exact-nonnegative-integer?) (? exact-nonnegative-integer?))
+                         (bitwise-ior (* c (expt 2 64)) d)]
                         [(`(hi ,x) `(lo ,x)) x]
                         [(x y) `(uint128 ,x ,y)])])
-            (>> (push `(hi (quotient ,dend ,isor)))
-                (>> (push `(lo (quotient ,dend ,isor)))
-                    (>> (push `(hi (remainder ,dend ,isor)))
-                        (push `(lo (remainder ,dend ,isor))))))))
+            (sif isor
+                 (>> (push `(hi (quotient ,dend ,isor)))
+                     (>> (push `(lo (quotient ,dend ,isor)))
+                         (>> (push `(hi (remainder ,dend ,isor)))
+                             (push `(lo (remainder ,dend ,isor))))))
+                 (panic "divmodw by 0"))))
         ; is-zero
-        (λ (c)
-          (mplus (>> (assume c)
-                     (unit #f))
-                 (>> (reject c)
-                     (unit #t))))
+        (λ (c) (sif c (unit #f) (unit #t)))
         ; &&
         (λ (x y) (unit `(∧ ,x ,y)))
         ; ||
@@ -363,11 +414,11 @@
         (λ (x y) (unit `(concat ,x ,y)))
         ; substring3
         (λ (a b c)
-          (mplus (>> (assume (<-reduce `(∧ (<= ,b ,c)
-                                           (<= ,c (len ,a)))))
+          (mplus (>> (assume (<rw `(∧ (<= ,b ,c)
+                                      (<= ,c (len ,a)))))
                      (unit `(substring3 ,a ,b ,c)))
-                 (>> (reject (<-reduce `(∧ (<= ,b ,c)
-                                           (<= ,c (len ,a)))))
+                 (>> (reject (<rw `(∧ (<= ,b ,c)
+                                      (<= ,c (len ,a)))))
                      (panic "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c)))))
         ; transaction
         (match-lambda
@@ -447,7 +498,11 @@
         (λ (i)
           (>>= (get scratch-space)
                (λ (ss)
-                 (unit (hash-ref ss i `(scratch-space ,i))))))
+                 (cond
+                   [(hash-ref ss i #f) => unit]
+                   [else
+                    (>> (log "Scratch space slot ~a uninitialized. The Go VM implementation produces 0." i)
+                        (unit 0))]))))
         ; store
         (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x))))
         ; balance
@@ -459,7 +514,7 @@
           (>>= (get app-local)
                (letrec ([lookup (match-lambda
                                   [(list)
-                                   (unit `(app-local-get ,acct ,key))]
+                                   (unit `(app-local ,acct ,key))]
                                   [(cons `(put ,put-acct ,put-key ,val)
                                          al)
                                    (mplus (>> (assume `(∧ (= ,acct ,put-acct)
@@ -480,7 +535,7 @@
           (>>= (get app-global)
                (letrec ([lookup (match-lambda
                                   [(list)
-                                   (unit `(app-global-get ,key))]
+                                   (unit `(app-global ,key))]
                                   [(cons `(put ,put-key ,val)
                                          ag)
                                    (mplus (>> (assume `(= ,key ,put-key))
@@ -501,15 +556,15 @@
                  [0 (unit 'AssetBalance)]
                  [1 (unit 'AssetFrozen)])
                (λ (f)
-                 (>> (push `(asset-holding-get ,acct ,asset ,f))
-                     (push `(asset-holding-get-exists ,acct ,asset ,f))))))
+                 (>> (push `(asset-holding ,acct ,asset ,f))
+                     (push `(asset-holding-exists ,acct ,asset ,f))))))
         ; asset-params-get
         (λ (asset x)
           (>>= (match x
                  [3 (unit 'AssetUnitName)])
                (λ (f)
-                 (>> (push `(asset-params-get ,asset ,f))
-                     (push `(asset-params-get-exists ,asset ,f))))))
+                 (>> (push `(asset-params ,asset ,f))
+                     (push `(asset-params-exists ,asset ,f))))))
         ; check-final
         (>>= (get bytecode)
              (λ (bc)
@@ -534,6 +589,7 @@
        [(cons lsv bs)
         (let loop ([st (inject lsv bs)])
           #;(pretty-print (hash-remove st 'bytecode))
+          #;
           (printf "~a: 0x~a\n"
                   (hash-ref st 'pc)
                   (number->string (bytes-ref (hash-ref st 'bytecode) (hash-ref st 'pc))
@@ -543,11 +599,22 @@
              [(underway (list) st)
               (loop st)]
              [(failure! msg)
+              #;
               (pretty-print (hash-remove st 'bytecode))
-              (printf "FAIL: ~a\n" msg)]
+              #;
+              (printf "FAIL: ~a\n" msg)
+              (void)]
              [(returned code)
-              (pretty-print (hash-remove st 'bytecode))
-              (printf "RETURN: ~v\n" code)])
+              (match code
+                [0 (void)]
+                [1
+                 (displayln "RETURN 1")
+                 #;
+                 (pretty-print (hash-remove st 'bytecode))]
+                [code
+                 (printf "RETURN ~v\n" code)
+                 #;
+                 (pretty-print (hash-remove st 'bytecode))])])
            ((step Step-VM) st)))])]))
 
 #;
