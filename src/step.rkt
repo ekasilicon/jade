@@ -108,6 +108,40 @@
         [c       (assume c)]))
     (define interpretations
       (list
+       (interpretation
+        #:assume
+        (λ (c)
+          (and (exact-nonnegative-integer? c)
+               (if (zero? c) mzero (unit))))
+        #:reject
+        (λ (c)
+          (and (exact-nonnegative-integer? c)
+               (if (zero? c) (unit) mzero))))
+       (interpretation
+        #:assume
+        (match-lambda
+          [`(= ,x₀ ,x₁)
+           (or (and (bytes? x₀)
+                    (bytes? x₁)
+                    (if (bytes=? x₀ x₁) (unit) mzero))
+               (and (exact-nonnegative-integer? x₀)
+                    (exact-nonnegative-integer? x₁)
+                    (if (= x₀ x₁) (unit) mzero))
+               (and (equal? x₀ x₁)
+                    (unit)))]
+          [_ #f])
+        #:reject
+        (match-lambda
+          [`(= ,x₀ ,x₁)
+           (or (and (bytes? x₀)
+                    (bytes? x₁)
+                    (if (bytes=? x₀ x₁) mzero (unit)))
+               (and (exact-nonnegative-integer? x₀)
+                    (exact-nonnegative-integer? x₁)
+                    (if (= x₀ x₁) mzero (unit)))
+               (and (equal? x₀ x₁)
+                    mzero))]
+          [_ #f]))
        ; come up with a generic interpretation for enumerations (small finite sets)
        #;
        (interpretation
@@ -188,29 +222,10 @@
         [`(∧ ,c₀ ,c₁)
          (>> (assume c₀)
              (assume c₁))]
+        #;
         [`(∨ ,c₀ ,c₁)
          (mplus (assume c₀)
                 (assume c₁))]
-        [(? exact-nonnegative-integer? n)
-         (if (zero? n)
-           mzero
-           (unit))]
-        [`(= ,x₀ ,x₁)
-         (cond
-           [(and (bytes? x₀)
-                 (bytes? x₁))
-            (if (bytes=? x₀ x₁)
-              (unit)
-              mzero)]
-           [(and (exact-nonnegative-integer? x₀)
-                 (exact-nonnegative-integer? x₁))
-            (if (= x₀ x₁)
-              (unit)
-              mzero)]
-           [(equal? x₀ x₁)
-            (unit)]
-           [else
-            (failure-cont)])]
         [c
          (or (ormap (λ (i) (i c)) interpretations)
              (failure-cont))]
@@ -227,29 +242,10 @@
         [`(∨ ,c₀ ,c₁)
          (>> (reject c₀)
              (reject c₁))]
+        #;
         [`(∧ ,c₀ ,c₁)
          (mplus (reject c₀)
                 (reject c₁))]
-        [(? exact-nonnegative-integer? n)
-         (if (zero? n)
-           (unit)
-           mzero)]
-        [`(= ,x₀ ,x₁)
-         (cond
-           [(and (bytes? x₀)
-                 (bytes? x₁))
-            (if (bytes=? x₀ x₁)
-              mzero
-              (unit))]
-           [(and (exact-nonnegative-integer? x₀)
-                 (exact-nonnegative-integer? x₁))
-            (if (= x₀ x₁)
-              mzero
-              (unit))]
-           [(equal? x₀ x₁)
-            mzero]
-           [else
-            (failure-cont)])]
         [c
          (or (ormap (λ (i) (i `(¬ ,c))) interpretations)
              (failure-cont))]
@@ -343,7 +339,7 @@
         (λ (x y)
           (sif y
                (unit `(/ ,x ,y))
-               ) )
+               (panic "/: ~a is zero" y)))
         ; *
         ; XXX handle overflow
         (λ (x y) (unit `(* ,x ,y)))
@@ -609,11 +605,9 @@
                 [0 (void)]
                 [1
                  (displayln "RETURN 1")
-                 #;
                  (pretty-print (hash-remove st 'bytecode))]
                 [code
                  (printf "RETURN ~v\n" code)
-                 #;
                  (pretty-print (hash-remove st 'bytecode))])])
            ((step Step-VM) st)))])]))
 
