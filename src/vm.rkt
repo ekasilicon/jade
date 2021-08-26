@@ -36,11 +36,12 @@
                       !
                       ~
                       concat
-                      substring3
-                      transaction
+                      substring
                       global
-                      global-transaction
+                      transaction
+                      group-transaction
                       transaction-array
+                      group-transaction-array
                       load
                       store
                       balance
@@ -90,11 +91,12 @@
                     vm!
                     vm~
                     concat
-                    substring3
-                    transaction
+                    substring
                     global
-                    global-transaction
+                    transaction
+                    group-transaction
                     transaction-array
+                    group-transaction-array
                     load
                     store
                     balance
@@ -275,18 +277,28 @@
                (λ (ti)
                  (>>= (read-uint8 rb)
                       (λ (fi)
-                        (global-transaction ti fi)))))
+                        (group-transaction ti fi)))))
           push)]
     [#x34 ; load
      (>>= (>>= (read-uint8 rb) load) push)]
     [#x35 ; store
      (>>= (read-uint8 rb) (λ (i) (>>= pop (λ (x) (store i x)))))]
     [#x36 ; txna
-     (>>= (>>= (read-uint8 rb)
-          (λ (fi)
-            (>>= (read-uint8 rb)
-                 (λ (ai) (transaction-array fi ai)))))
-          push)]
+     (>> (lsv>= 2 "txna")
+         (>>= (>>= (read-uint8 rb)
+                   (λ (fi)
+                     (>>= (read-uint8 rb)
+                          (λ (ai) (transaction-array fi ai)))))
+              push))]
+    [#x37 ; gtxna
+     (>> (lsv>= 2 "txna")
+         (>>= (>>= (read-uint8 rb)
+                   (λ (gi)
+                     (>>= (read-uint8 rb)
+                          (λ (fi)
+                            (>>= (read-uint8 rb)
+                                 (λ (ai) (group-transaction-array gi fi ai))))))) 
+              push))]
     [#x40 ; bnz
      (>>= (read-int16 rb)
           (λ (offset)
@@ -352,9 +364,17 @@
     [#x50 ; concat
      (>> (lsv>= 2 "concat")
          (stack-apply concat 2))]
+    [#x51 ; substring
+     (>> (lsv>= 2 "substring")
+         (>>= (>>= (read-uint8 rb)
+                 (λ (s)
+                   (>>= (read-uint8 rb)
+                        (λ (e)
+                          (>>= pop (λ (a) (substring a s e)))))))
+              push))]
     [#x52 ; substring3
      (>> (lsv>= 2 "substring3")
-         (stack-apply substring3 3))]
+         (stack-apply substring 3))]
     [#x60 ; balance
      (>> (lsv>= 2 "balance")
          (>> (in-mode 'Application "balance")
@@ -443,11 +463,12 @@
                     _ ; !
                     _ ; ~
                     _ ; concat
-                    _ ; substring3
+                    _ ; substring
                     _ ; transaction
                     _ ; global
-                    _ ; global-transaction
+                    _ ; group-transaction
                     _ ; transaction-array
+                    _ ; group-transaction-array
                     _ ; load
                     _ ; store
                     _ ; balance

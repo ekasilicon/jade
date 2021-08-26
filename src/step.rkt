@@ -190,6 +190,10 @@
         (match-lambda
           [`(< ,x ,x)
            mzero]
+          [`(< ,(uint64 x) ,(uint64 y))
+           (if (< x y)
+             (unit)
+             mzero)]
           [`(< ,(uint64 x) (exp 2 64))
            (if (< x (expt 2 64))
              (unit)
@@ -199,6 +203,14 @@
         (match-lambda
           [`(< ,x ,x)
            (unit)]
+          [`(< ,(uint64 x) ,(uint64 y))
+           (if (< x y)
+             mzero
+             (unit))]
+          [`(< ,(uint64 x) (exp 2 64))
+           (if (< x (expt 2 64))
+             mzero
+             (unit))]
           [_ #f]))
        #;
        (interpretation
@@ -408,33 +420,12 @@
         (λ (x) (unit `(~ ,x)))
         ; concat
         (λ (x y) (unit `(concat ,x ,y)))
-        ; substring3
-        (λ (a b c)
-          (mplus (>> (assume (<rw `(∧ (<= ,b ,c)
-                                      (<= ,c (len ,a)))))
-                     (unit `(substring3 ,a ,b ,c)))
-                 (>> (reject (<rw `(∧ (<= ,b ,c)
-                                      (<= ,c (len ,a)))))
-                     (panic "substring3 out of bounds: ~v" `(substring3 ,a ,b ,c)))))
-        ; transaction
-        (match-lambda
-          [0  ; Sender
-           (unit 'Sender)]
-          [1  ; Fee 
-           (unit 'Fee)]
-          [16 ; TypeEnum
-           (unit 'TypeEnum)]
-          [24 ; ApplicationID
-           (>> ((logic-sig-version>= Step-VM) 2 "ApplicationID")
-               (unit 'ApplicationID))]
-          [25 ; OnCompletion
-           (unit 'OnCompletion)]
-          [27 ; NumAppArgs
-           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
-               (unit 'NumAppArgs))]
-          [32 ; 
-           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
-               (unit 'RekeyTo))])
+        ; substring
+        (λ (a s e)
+          (sif (<rw `(∧ (<= ,s ,e)
+                        (<= ,e (len ,a))))
+               (unit `(substring ,a ,s ,e))
+               (panic "substring out of bounds: ~v" `(substring ,a ,s ,e))))
         ; global
         (match-lambda
           [3 ; ZeroAddress
@@ -453,6 +444,30 @@
            ; "Address of the creator of the current application. Fails if no such application is executing."
            (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
                (unit 'CreatorAddress))])
+        ; transaction
+        (match-lambda
+          [0  ; Sender
+           (unit 'Sender)]
+          [1  ; Fee 
+           (unit 'Fee)]
+          [16 ; TypeEnum
+           (unit 'TypeEnum)]
+          [22 ; GroupIndex
+           (unit 'GroupIndex)]
+          [24 ; ApplicationID
+           (>> ((logic-sig-version>= Step-VM) 2 "ApplicationID")
+               (unit 'ApplicationID))]
+          [25 ; OnCompletion
+           (unit 'OnCompletion)]
+          [27 ; NumAppArgs
+           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+               (unit 'NumAppArgs))]
+          [29 ; NumAccounts
+           (>> ((logic-sig-version>= Step-VM) 2 "NumAccounts")
+               (unit 'NumAccounts))]
+          [32 ; 
+           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+               (unit 'RekeyTo))])
         ; global-transaction
         (λ (ti fi)
           (match fi
@@ -486,7 +501,17 @@
           (match fi
             [26 ; ApplicationArgs
              (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
-                 (unit `(ApplicationArgs ,ai)))]
+                 (unit `(ApplicationArgs GroupIndex ,ai)))]
+            [28 ; Accounts
+             (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
+                 (unit `(Accounts ,ai)))]))
+        ; group-transaction-array
+        (λ (gi fi ai)
+          (match fi
+            [26 ; ApplicationArgs
+             (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
+                 (unit `(ApplicationArgs ,gi ,ai)))]
+            #;
             [28 ; Accounts
              (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
                  (unit `(Accounts ,ai)))]))
