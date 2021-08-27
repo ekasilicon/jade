@@ -142,6 +142,44 @@
                (and (equal? x₀ x₁)
                     mzero))]
           [_ #f]))
+       (interpretation
+        #:assume
+        (letrec ([recur (match-lambda
+                          [`(= OnCompletion ,oc)
+                           (and (memq oc '(0 1 2 4 5))
+                                (>>= (get OnCompletion #f)
+                                     (match-lambda
+                                       [#f
+                                        (set OnCompletion `(known ,oc))]
+                                       [`(known ,oc₀)
+                                        (assume `(= ,oc₀ ,oc))]
+                                       [`(unknown ,ocs)
+                                        (for/fold ([m (set OnCompletion oc)])
+                                                  ([oc₀ (in-list ocs)])
+                                          (>> (reject `(= ,oc₀ ,oc))
+                                              m))])))]
+                          [`(= ,oc OnCompletion)
+                           (recur `(= OnCompletion ,oc))]
+                          [_ #f])])
+          recur)
+        #:reject
+        (letrec ([recur (match-lambda
+                          [`(= OnCompletion ,oc)
+                           (and (memq oc '(0 1 2 4 5))
+                                (>>= (get OnCompletion #f)
+                                     (match-lambda
+                                       [#f
+                                        (set OnCompletion `(unknown ,(list oc)))]
+                                       [`(known ,oc₀)
+                                        (reject `(= ,oc₀ ,oc))]
+                                       [`(unknown ,ocs)
+                                        (if (memq oc ocs)
+                                          (unit)
+                                          (set OnCompletion `(unknown ,(cons oc ocs))))])))]
+                          [`(= ,oc OnCompletion)
+                           (recur `(= OnCompletion ,oc))]
+                          [_ #f])])
+          recur))
        ; come up with a generic interpretation for enumerations (small finite sets)
        #;
        (interpretation
@@ -297,6 +335,65 @@
          (unit (list s x y))]))
     (define (log template . args)
       (update execution-log (λ (msgs) (cons (apply format template args) msgs))))
+    (define (group-transaction gi fi)
+      (>>= (match fi
+            [0  ; Sender
+             (unit 'Sender)]
+            [1  ; Fee
+             (unit 'Fee)]
+            [7  ; Receiver
+             (unit 'Receiver)]
+            [8  ; Amount
+             (unit 'Amount)]
+            [9  ; CloseRemainderTo
+             (unit 'CloseRemainderTo)]
+            [16 ; TypeEnum
+             (unit 'TypeEnum)]
+            [17 ; XferAsset
+             (unit 'XferAsset)]
+            [18 ; AssetAmount
+             (unit 'AssetAmount)]
+            [19 ; AssetSender
+             (unit 'AssetSender)]
+            [20 ; AssetReceiver
+             (unit 'AssetReceiver)]
+            [21 ; AssetCloseTo
+             (unit 'AssetCloseTo)]
+            [22 ; GroupIndex
+             (unit 'GroupIndex)]
+            [24 ; ApplicationID
+             (>> ((logic-sig-version>= Step-VM) 2 "ApplicationID")
+                 (unit 'ApplicationID))]
+            [25 ; OnCompletion
+             (unit 'OnCompletion)]
+            [27 ; NumAppArgs
+             (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+                 (unit 'NumAppArgs))]
+            [29 ; NumAccounts
+             (>> ((logic-sig-version>= Step-VM) 2 "NumAccounts")
+                 (unit 'NumAccounts))]
+            [32 ; 
+             (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+                 (unit 'RekeyTo))]
+            [38 ; ConfigAssetName
+             (>> ((logic-sig-version>= Step-VM) 2 "ConfigAssetName")
+                 (unit 'ConfigAssetName))])
+           (λ (f)
+             (if (eq? gi 'this-group-index)
+               (unit f)
+               (unit `(txn ,gi ,f))))))
+    (define (group-transaction-array gi fi ai)
+      (>>= (match fi
+             [26 ; ApplicationArgs
+              (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
+                  (unit 'ApplicationArgs))]
+             [28 ; Accounts
+              (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
+                  (unit 'Accounts))])
+           (λ (f)
+             (if (eq? gi 'this-group-index)
+               (unit `(,f ,ai))
+               (unit `(txn ,gi ,f ,ai))))))
     (VM Step-MonadPlus Step-ReadByte
         ; panic
         panic
@@ -445,76 +542,13 @@
            (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
                (unit 'CreatorAddress))])
         ; transaction
-        (match-lambda
-          [0  ; Sender
-           (unit 'Sender)]
-          [1  ; Fee 
-           (unit 'Fee)]
-          [16 ; TypeEnum
-           (unit 'TypeEnum)]
-          [22 ; GroupIndex
-           (unit 'GroupIndex)]
-          [24 ; ApplicationID
-           (>> ((logic-sig-version>= Step-VM) 2 "ApplicationID")
-               (unit 'ApplicationID))]
-          [25 ; OnCompletion
-           (unit 'OnCompletion)]
-          [27 ; NumAppArgs
-           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
-               (unit 'NumAppArgs))]
-          [29 ; NumAccounts
-           (>> ((logic-sig-version>= Step-VM) 2 "NumAccounts")
-               (unit 'NumAccounts))]
-          [32 ; 
-           (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
-               (unit 'RekeyTo))])
-        ; global-transaction
-        (λ (ti fi)
-          (match fi
-            [0  ; Sender
-             (unit `(txn ,ti Sender))]
-            [1  ; Fee
-             (unit `(txn ,ti Fee))]
-            [7  ; Receiver
-             (unit `(txn ,ti Receiver))]
-            [8  ; Amount
-             (unit `(txn ,ti Amount))]
-            [9  ; CloseRemainderTo
-             (unit `(txn ,ti CloseRemainderTo))]
-            [16 ; TypeEnum
-             (unit `(txn ,ti TypeEnum))]
-            [17 ; XferAsset
-             (unit `(txn ,ti XferAsset))]
-            [18 ; AssetAmount
-             (unit `(txn ,ti AssetAmount))]
-            [19 ; AssetSender
-             (unit `(txn ,ti AssetSender))]
-            [20 ; AssetReceiver
-             (unit `(txn ,ti AssetReceiver))]
-            [21 ; AssetCloseTo
-             (unit `(txn ,ti AssetCloseTo))]
-            [38 ; ConfigAssetName
-             (>> ((logic-sig-version>= Step-VM) 2 "ConfigAssetName")
-                 (unit 'ConfigAssetName))]))
+        (λ (fi) (group-transaction 'this-group-index fi))
+        ; group-transaction
+        group-transaction
         ; transaction-array
-        (λ (fi ai)
-          (match fi
-            [26 ; ApplicationArgs
-             (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
-                 (unit `(ApplicationArgs GroupIndex ,ai)))]
-            [28 ; Accounts
-             (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
-                 (unit `(Accounts ,ai)))]))
+        (λ (fi ai) (group-transaction-array 'this-group-index fi ai))
         ; group-transaction-array
-        (λ (gi fi ai)
-          (match fi
-            [26 ; ApplicationArgs
-             (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
-                 (unit `(ApplicationArgs ,gi ,ai)))]
-            #;
-            [28 ; Accounts
-             (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
-                 (unit `(Accounts ,ai)))]))
+        group-transaction-array
         ; load
         (λ (i)
           (>>= (get scratch-space)
