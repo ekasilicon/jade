@@ -21,7 +21,8 @@
           'path-condition (r:set)
           'app-local (list) ; at best a map, at worst a sequence of puts
           'app-global (list)
-          'execution-log (list)))
+          'execution-log (list)
+          'call-stack (list)))
 
 (struct underway (xs state))
 (struct returned (code))
@@ -154,7 +155,7 @@
                                        [`(known ,oc₀)
                                         (assume `(= ,oc₀ ,oc))]
                                        [`(unknown ,ocs)
-                                        (for/fold ([m (set OnCompletion oc)])
+                                        (for/fold ([m (set OnCompletion `(known, oc))])
                                                   ([oc₀ (in-list ocs)])
                                           (>> (reject `(= ,oc₀ ,oc))
                                               m))])))]
@@ -180,49 +181,7 @@
                            (recur `(= OnCompletion ,oc))]
                           [_ #f])])
           recur))
-       ; come up with a generic interpretation for enumerations (small finite sets)
-       #;
-       (interpretation
-        #:assume
-        (match-lambda
-          [`(= OnCompletion ,oc)
-           (>>= (get OnCompletion #f)
-                (match-lambda
-                  [#f
-                   (set OnCompletion `(known ,oc))]
-                  [`(known ,oc₀)
-                   (assume `(= ,oc₀ ,oc))]
-                  [`(eliminated ,ocs)
-                   (for/fold ([m (set OnCompletion `(known ,oc))])
-                             ([oc₀ (in-set ocs)])
-                     (>> (reject `(= ,oc ,oc₀))
-                         m))]))]
-          [_ #f])
-        #:reject
-        (match-lambda
-             [`(= OnCompletion ,oc)
-              (>>= (get OnCompletion #f)
-                   (match-lambda
-                     [#f
-                      (set OnCompletion `(eliminated ,(r:set oc)))]
-                     [`(known ,oc₀)
-                      (reject `(= ,oc₀ ,oc))]
-                     [`(eliminated ,ocs)
-                      (set OnCompletion `(eliminated ,(r:set-add ocs oc)))]))
-              (update OnCompletion
-                      (match-lambda
-                        [`(known ,oc₀)
-                         `(known ,oc₀)]
-                        [`(eliminated ,oc₀)
-                         (let* ([oc₀ (r:set-add oc₀ oc)]
-                                [occ (for/fold ([ocs (r:set 0 1 2 4 5)])
-                                               ([oc (r:in-set oc₀)])
-                                       (r:set-remove ocs oc))])
-                           (if (= (r:set-count occ) 1)
-                             `(known ,(r:set-first occ))
-                             `(eliminated ,oc₀)))])
-                      `(eliminated ,(r:set)))]
-             [_ #f]))
+       
        (interpretation
         #:assume
         (match-lambda
@@ -341,6 +300,8 @@
              (unit 'Sender)]
             [1  ; Fee
              (unit 'Fee)]
+            [6  ; Lease
+             (unit 'Lease)]
             [7  ; Receiver
              (unit 'Receiver)]
             [8  ; Amount
@@ -430,11 +391,21 @@
         push
         ; pop
         pop
+        ; push-call
+        (λ (ret-pc) (update call-stack (λ (pcs) (cons ret-pc pcs))))
+        ; pop-call
+        (>>= (get call-stack)
+             (match-lambda
+               [(cons pc pcs)
+                (>> (set call-stack pcs)
+                    (unit pc))]))
+        ; sha256
+        (λ (x) (unit `(sha256 ,x)))
         ; +
         (λ (x y)
           (>>= (uint64-op2 '+ + x y)
                (λ (z)
-                 (>> (log "using symbolic constant (exp 2 64)")
+                 (>> (log "using symbolic constant (exp 2 64) for +")
                      (sif (<rw `(< ,z (exp 2 64)))
                           (unit z)
                           (panic "~a + ~a overflows" x y))))))
@@ -450,8 +421,13 @@
                (unit `(/ ,x ,y))
                (panic "/: ~a is zero" y)))
         ; *
-        ; XXX handle overflow
-        (λ (x y) (unit `(* ,x ,y)))
+        (λ (x y)
+          (>>= (uint64-op2 '* * x y)
+               (λ (z)
+                 (>> (log "using symbolic constant (exp 2 64) for *")
+                     (sif (<rw `(< ,z (exp 2 64)))
+                          (unit z)
+                          (panic "~a * ~a overflows" x y))))))
         ; len
         (λ (x) (unit `(len ,x)))
         ; itob
@@ -525,6 +501,8 @@
                (panic "substring out of bounds: ~v" `(substring ,a ,s ,e))))
         ; global
         (match-lambda
+          [0 ; MinTxnFee
+           (unit 'MinTxnFee)]
           [3 ; ZeroAddress
            (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
                (unit 'ZeroAddress))]
@@ -585,6 +563,10 @@
         ; app-local-del
         (λ (acct key)
           (update app-local (λ (al) (cons `(del ,acct ,key) al))))
+        ; app-local-get-ex
+        (λ (acct app-id key)
+          (>> (push `(app-local ,acct ,app-id ,key))
+              (push `(app-local-exists ,acct ,app-id ,key))))
         ; app-global-get
         (λ (key)
           (>>= (get app-global)
@@ -620,6 +602,9 @@
                (λ (f)
                  (>> (push `(asset-params ,asset ,f))
                      (push `(asset-params-exists ,asset ,f))))))
+        ; bzero
+        (λ (x)
+          (unit `(bzero ,x)))
         ; check-final
         (>>= (get bytecode)
              (λ (bc)

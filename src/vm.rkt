@@ -17,6 +17,9 @@
                       put-bytecblock
                       push
                       pop
+                      push-call
+                      pop-call
+                      sha256
                       +
                       -
                       /
@@ -49,11 +52,13 @@
                       app-local-get
                       app-local-put
                       app-local-del
+                      app-local-get-ex
                       app-global-get
                       app-global-put
                       app-global-get-ex
                       asset-holding-get
                       asset-params-get
+                      bzero
                       check-final))
 
 ; execute : VM m s => byte → m ()
@@ -72,6 +77,9 @@
                     put-bytecblock
                     push
                     pop
+                    push-call
+                    pop-call
+                    sha256
                     vm+
                     vm-
                     vm/
@@ -104,11 +112,13 @@
                     app-local-get
                     app-local-put
                     app-local-del
+                    app-local-get-ex
                     app-global-get
                     app-global-put
                     app-global-get-ex
                     asset-holding-get
                     asset-params-get
+                    bzero
                     _ ; check-final
                     ) vm)
   (define lsv>= (logic-sig-version>= vm))
@@ -163,6 +173,9 @@
   (match-lambda
     [#x00 ; err
      (panic "err")]
+    [#x01 ; sha256
+     (stack-apply sha256 1)
+     ]
     [#x08 ; +
      (stack-apply vm+ 2)]
     [#x09 ; -
@@ -299,6 +312,14 @@
                             (>>= (read-uint8 rb)
                                  (λ (ai) (group-transaction-array gi fi ai))))))) 
               push))]
+    [#x38 ; gtxns
+     (>> (lsv>= 3 "gtxns")
+         (>>= (>>= pop
+                   (λ (ti)
+                     (>>= (read-uint8 rb)
+                          (λ (fi)
+                            (group-transaction ti fi)))))
+              push))]
     [#x40 ; bnz
      (>>= (read-int16 rb)
           (λ (offset)
@@ -348,6 +369,20 @@
                            (>> (push b)
                                (>> (push a)
                                    (push b)))))))))]
+    [#x4b ; dig
+     (>> (lsv>= 3 "dig")
+         (>>= (letrec ([loop (λ (n)
+                               (>>= pop
+                                    (λ (x)
+                                      (if (zero? n)
+                                        (>> (push x)
+                                            (unit x))
+                                        (>>= (loop (sub1 n))
+                                             (λ (y)
+                                               (push x)
+                                               (unit y)))))))])
+                (>>= (read-uint8 rb) loop))
+              push))]
     [#x4c ; swap
      (>> (lsv>= 3 "swap")
          swap)]
@@ -383,12 +418,16 @@
      (>> (lsv>= 2 "app_local_get")
          (>> (in-mode 'Application "app_local_get")
              (stack-apply app-local-get 2)))]
+    [#x63 ; app_local_get_ex
+     (>> (lsv>= 2 "app_local_get_ex")
+         (>> (in-mode 'Application "app_local_get_ex")
+             (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-get-ex a b c)))))))))]
     [#x64 ; app_global_get
      (>> (lsv>= 2 "app_global_get")
          (>> (in-mode 'Application "app_global_get")
              (stack-apply app-global-get 1)))]
     [#x65 ; app_global_get_ex
-     (>> (lsv>= 2 "app_global_get")
+     (>> (lsv>= 2 "app_global_get_ex")
          (>> (in-mode 'Application "app_global_get_ex")
              (>>= pop (λ (b) (>>= pop (λ (a) (app-global-get-ex a b)))))))]
     [#x66 ; app_local_put
@@ -423,6 +462,21 @@
     [#x81 ; pushint
      (>> (lsv>= 3 "pushint")
          (>>= (read-varuint rb) push))]
+    [#x88 ; callsub
+     (>> (lsv>= 4 "callsub")
+         (>>= (read-int16 rb)
+              (λ (offset)
+                (>>= get-pc
+                     (λ (ret-pc)
+                       (>> (push-call ret-pc)
+                           (goto (+ ret-pc offset))))))))]
+    [#x89 ; retsub
+     (>> (lsv>= 4 "retsub")
+         (>>= pop-call goto))]
+    [#xaf ; bzero
+     (>> (lsv>= 4 "bzero")
+         (stack-apply bzero 1))
+     ]
     [bc
      (display "0x")
      (displayln (number->string bc 16))
@@ -444,6 +498,9 @@
                     _ ; put-bytecblock
                     _ ; push
                     _ ; pop
+                    _ ; push-call
+                    _ ; pop-call
+                    _ ; sha256
                     _ ; +
                     _ ; -
                     _ ; /
@@ -476,11 +533,13 @@
                     _ ; app-local-get
                     _ ; app-local-put
                     _ ; app-local-del
+                    _ ; app-local-get-ex
                     _ ; app-global-get
                     _ ; app-global-put
                     _ ; app-global-get-ex
                     _ ; asset-holding-get
                     _ ; asset-params-get
+                    _ ; bzero
                     check-final
                     ) vm)
   (>> (>>= (read-opcode rb)
