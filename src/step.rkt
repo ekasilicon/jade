@@ -434,10 +434,9 @@
         (λ (x) (unit `(itob ,x)))
         ; btoi
         (λ (x)
-          (mplus (>> (assume (<rw `(<= (len ,x) 8)))
-                     (unit `(btoi ,x)))
-                 (>> (reject (<rw `(<= (len ,x) 8)))
-                     (panic "btoi: input greater than 8 bytes"))))
+          (sif (<rw `(<= (len ,x) 8))
+               (unit `(btoi ,x))
+               (panic "btoi: input greater than 8 bytes")))
         ; %
         ; XXX handle % by zero
         (λ (x y) (unit `(% ,x ,y)))
@@ -550,12 +549,10 @@
                                    (unit `(app-local ,acct ,key))]
                                   [(cons `(put ,put-acct ,put-key ,val)
                                          al)
-                                   (mplus (>> (assume `(∧ (= ,acct ,put-acct)
-                                                          (= ,key  ,put-key)))
-                                              (unit val))
-                                          (>> (reject `(∧ (= ,acct ,put-acct)
-                                                          (= ,key  ,put-key)))
-                                              (lookup al)))])])
+                                   (sif `(∧ (= ,acct ,put-acct)
+                                            (= ,key  ,put-key))
+                                        (unit val)
+                                        (lookup al))])])
                  lookup)))
         ; app-local-put
         (λ (acct key val)
@@ -575,10 +572,9 @@
                                    (unit `(app-global ,key))]
                                   [(cons `(put ,put-key ,val)
                                          ag)
-                                   (mplus (>> (assume `(= ,key ,put-key))
-                                              (unit val))
-                                          (>> (reject `(= ,key ,put-key))
-                                              (lookup ag)))])])
+                                   (sif `(= ,key ,put-key)
+                                        (unit val)
+                                        (lookup ag))])])
                  lookup)))
         ; app-global-put
         (λ (key val)
