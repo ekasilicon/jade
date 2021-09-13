@@ -1,0 +1,364 @@
+program
+[*(line)]
+
+line
+(content)[* ][?\r]\n
+(content)[* ]
+
+content
+(pragma)
+(comment)
+(instruction)
+(target)
+
+pragma
+#pragma[+ ][+^{\r\n}]
+
+comment
+//[*^{\r\n}]
+
+instruction
+(arithmetic-logic-cryptographic-instruction)
+(byte-array-extract-instruction)
+(byte-array-arithmetic-instruction)
+(byte-array-logic-instruction)
+(inner-transaction-instruction) 
+(value-loading-instruction)
+(flow-control-instruction)
+(state-access-instruction)
+
+target
+(label)[* ]:
+
+arithmetic-logic-cryptographic-instruction
+sha256
+keccak256
+sha512_256
+ed25519verify
++
+-
+/
+*
+<
+>
+<=
+>=
+&&
+||
+shl
+shr
+sqrt
+bitlen
+exp
+==
+!=
+!
+len
+itob
+btoi
+%
+|
+&
+^
+~
+mulw
+addw
+divmodw
+expw
+getbit
+setbit
+getbyte
+setbyte
+concat
+
+byte-array-extract-instruction
+substring[+ ](number)[+ ](number)
+substring3
+extract[+ ](number)[+ ](number)
+extract3
+extract16bits
+extract32bits
+extract64bits
+
+byte-array-arithmetic-instruction
+b+
+b-
+b/
+b*
+b<
+b>
+b<=
+b>=
+b==
+b!=
+b%
+
+byte-array-logic-instruction
+b|
+b&
+b^
+b~
+
+inner-transaction-instruction
+tx_begin
+tx_field[+ ](transaction-field)
+tx_submit
+
+value-loading-instruction
+intcblock[*[+ ](number)]
+intc[+ ](number)
+intc_0
+intc_1
+intc_2
+intc_3
+pushint[+ ](number)
+bytecblock[*[+ ](bytes)]
+bytec[+ ](number)
+bytec_0
+bytec_1
+bytec_2
+bytec_3
+pushbytes[+ ](bytes)
+bzero
+arg[+ ](number)
+arg_0
+arg_1
+arg_2
+arg_3
+txn[+ ](transaction-field)
+gtxn[+ ](number)[+ ](transaction-field)
+txna[+ ](transaction-field)[+ ](number)
+txnas[+ ](transaction-field)
+gtxna[+ ](number)[+ ](transaction-field)[+ ](number)
+gtxnas[+ ](number)[+ ](transaction-field)
+gtxns[+ ](transaction-field)
+gtxnsa[+ ](transaction-field)[+ ](number)
+gtxnsas[+ ](transaction-field)
+gtxnsas[+ ](transaction-field)
+global[+ ](global-field)
+load[+ ](number)
+loads
+store[+ ](number)
+stores
+gload[+ ](number)[+ ](number)
+gloads[+ ](number)
+gaid[+ ](number)
+gaids
+args
+
+flow-control-instruction
+err
+bnz[+ ](label)
+bz[+ ](label)
+b[+ ](label)
+return
+pop
+dup
+dup2
+dig[+ ](number)
+cover[+ ](number)
+uncover[+ ](number)
+swap
+select
+assert
+callsub[+ ](label)
+retsub
+
+state-access-instruction
+balance
+min_balance
+app_opted_in
+app_local_get
+app_local_get_ex
+app_global_get
+app_global_get_ex
+app_local_put
+app_global_put
+app_local_del
+app_global_del
+asset_holding_get[+ ](asset-holding-field)
+asset_params_get[+ ](asset-param-field)
+app_params_get[+ ](app-field)
+log
+
+number
+(hex-number)
+(octal-number)
+(decimal-number)
+
+hex-number
+0x[+(hex-digit)]
+
+octal-number
+0[+(octal-digit)]
+
+decimal-number
+[+(decimal-digit)]
+
+bytes
+byte[+ ]base64[+ ](base64)
+byte[+ ]b64[+ ](base64)
+byte[+ ]base64\((base64)\)
+byte[+ ]b64\((base64)\)
+byte[+ ]base32[+ ](base32)
+byte[+ ]b32[+ ](base32)
+byte[+ ]base32\((base32)\)
+byte[+ ]b32\((base32)\)
+byte[+ ](hex-number)
+byte[+ ](string)
+
+string
+"[*.]"
+
+hex-digit
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+a
+b
+c
+d
+e
+f
+A
+B
+C
+D
+E
+F
+
+octal-digit
+0
+1
+2
+3
+4
+5
+6
+7
+
+decimal-digit
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+
+transaction-field
+Sender
+Fee
+FirstValid
+FirstValidTime
+LastValid
+Note
+Lease
+Receiver
+Amount
+CloseRemainderTo
+VotePK
+SelectionPK
+VoteFirst
+VoteLast
+VoteKeyDilution
+Type
+TypeEnum
+XferAsset
+AssetAmount
+AssetSender
+AssetReceiver
+AssetCloseTo
+GroupIndex
+TxID
+ApplicationID
+OnCompletion
+ApplicationArgs
+NumAppArgs
+Accounts
+NumAccounts
+ApprovalProgram
+ClearStateProgram
+RekeyTo
+ConfigAsset
+ConfigAssetTotal
+ConfigAssetDecimals
+ConfigAssetDefaultFrozen
+ConfigAssetUnitName
+ConfigAssetName
+ConfigAssetURL
+ConfigAssetMetadataHash
+ConfigAssetManager
+ConfigAssetReserve
+ConfigAssetFreeze
+ConfigAssetClawback
+FreezeAsset
+FreezeAssetAccount
+FreezeAssetFrozen
+Assets
+NumAssets
+Applications
+NumApplications
+GlobalNumUint
+GlobalNumByteSlice
+LocalNumUint
+LocalNumByteSlice
+ExtraProgramPages
+Nonparticipation
+
+global-field
+MinTxnFee
+MinBalance
+MaxTxnLife
+ZeroAddress
+GroupSize
+LogicSigVersion
+Round
+LatestTimestamp
+CurrentApplicationID
+CreatorAddress
+CurrentApplicationAddress
+GroupID
+
+asset-holding-field
+AssetBalance
+AssetFrozen
+
+asset-param-field
+AssetTotal
+AssetDecimals
+AssetDefaultFrozen
+AssetUnitName
+AssetName
+AssetURL
+AssetMetadataHash
+AssetManager
+AssetReserve
+AssetFreeze
+AssetClawback
+AssetCreator
+
+app-field
+AppApprovalProgram
+AppClearStateProgram
+AppGlobalNumUint
+AppGlobalNumByteSlice
+AppLocalNumUint
+AppLocalNumByteSlice
+AppExtraProgramPages
+AppCreator
+AppAddress
+
+label
+[+^{ \t\r\n}]
+
