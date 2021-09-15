@@ -414,7 +414,7 @@ EOF
      (make-instruction "txna" transaction-field uint8)
      (make-instruction "gtxna" uint8 transaction-field uint8)
      (make-instruction "gtxnas" uint8 transaction-field)
-     (make-instruction "gtxns" (trace 'this transaction-field))
+     (make-instruction "gtxns" transaction-field)
      (make-instruction "gtxnsa" transaction-field uint8)
      (make-instruction "gtxnsas" transaction-field)
      (make-instruction "global" global-field)
