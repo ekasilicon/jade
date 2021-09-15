@@ -40,6 +40,7 @@
                       ~
                       concat
                       substring
+                      getbyte
                       global
                       transaction
                       group-transaction
@@ -100,6 +101,7 @@
                     vm~
                     concat
                     substring
+                    getbyte
                     global
                     transaction
                     group-transaction
@@ -410,6 +412,9 @@
     [#x52 ; substring3
      (>> (lsv>= 2 "substring3")
          (stack-apply substring 3))]
+    [#x55 ; getbyte
+     (>> (lsv>= 3 "getbyte")
+         (stack-apply getbyte 2))]
     [#x60 ; balance
      (>> (lsv>= 2 "balance")
          (>> (in-mode 'Application "balance")
@@ -521,6 +526,7 @@
                     _ ; ~
                     _ ; concat
                     _ ; substring
+                    _ ; getbyte
                     _ ; transaction
                     _ ; global
                     _ ; group-transaction

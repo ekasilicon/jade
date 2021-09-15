@@ -498,6 +498,12 @@
                         (<= ,e (len ,a))))
                (unit `(substring ,a ,s ,e))
                (panic "substring out of bounds: ~v" `(substring ,a ,s ,e))))
+        ; getbyte
+        (λ (a b)
+          (>> (log "ensure that getbyte has the invariant added here")
+              (sif (<rw `(< ,b (len ,a)))
+                   (unit `(getbyte ,a ,b))
+                   (panic "byte access out of bounds: ~v" `(getbyte ,a ,b)))))
         ; global
         (match-lambda
           [0 ; MinTxnFee
