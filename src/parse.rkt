@@ -620,10 +620,6 @@ EOF
                           (placeholder-set! ph (cons (list code is-ph) next-ph)))]
                     [else
                      (error 'parse "unknown label ~a" ℓ)])]
-                 [(or `(err)
-                      `(return)
-                      `(retsub))
-                  (placeholder-set! ph (cons instr (list)))]
                  [`(b ,ℓ)
                   (cond
                     [(hash-ref phs ℓ #f)
@@ -631,32 +627,12 @@ EOF
                           (placeholder-set! ph is-ph))]
                     [else
                      (error 'parse "unknown label ~a" ℓ)])]
+                 [(or `(err)
+                      `(return)
+                      `(retsub))
+                  (placeholder-set! ph (cons instr (list)))]
                  [_
                   (void)])
                (loop next-ph)]))
           (pretty-print (make-reader-graph initial-ph)))))))
-
-(module+ test
-  (parse
-   #<<EOF
-#pragma hello
-EOF
- )
-
-  (parse
-   #<<EOF
-#pragma hello
-   +
-EOF
- )
-
-  (parse
-   #<<EOF
-#pragma hello
-   +
-   -
-   /
-   *
-EOF
- ))
 
