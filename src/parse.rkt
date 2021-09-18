@@ -601,8 +601,6 @@ EOF
                                       [`(label ,ℓ)
                                        (placeholder-set! ph next-ph)
                                        (hash-set phs ℓ next-ph)]
-                                      [`(or `(err) `(return))
-                                       (placeholder-set! ph (cons instr (list)))]
                                       [_
                                        (placeholder-set! ph (cons instr next-ph))
                                        phs])])
@@ -615,11 +613,22 @@ EOF
                (void)]
               [(cons instr next-ph)
                (match instr
-                 [(list (and code (or 'bnz 'bz 'b 'callsub)) ℓ)
+                 [(list (and code (or 'bnz 'bz 'callsub)) ℓ)
                   (cond
                     [(hash-ref phs ℓ #f)
                      => (λ (is-ph)
                           (placeholder-set! ph (cons (list code is-ph) next-ph)))]
+                    [else
+                     (error 'parse "unknown label ~a" ℓ)])]
+                 [(or `(err)
+                      `(return)
+                      `(retsub))
+                  (placeholder-set! ph (cons instr (list)))]
+                 [`(b ,ℓ)
+                  (cond
+                    [(hash-ref phs ℓ #f)
+                     => (λ (is-ph)
+                          (placeholder-set! ph is-ph))]
                     [else
                      (error 'parse "unknown label ~a" ℓ)])]
                  [_

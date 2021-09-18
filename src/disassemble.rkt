@@ -281,6 +281,13 @@
     [(list* (list) s i)
      (let ([instructions (hash-ref s 'instructions)]
            [start-i (hash-ref s 'initial)])
+       ; instructions is a map from a left boundary to a `(succ ,instr ,next-i)
+       ; where instr is the instruction at that boundary and next-i is the right boundary
+       ; start-i is the left boundary of the first instruction
+
+       ; this loop does a pass through the instructions
+       ; to create a map from left boundaries to placeholders
+       ; which contain the instruction sequence (itself indirected by internal placeholders)
        (let ([phs (let loop ([i start-i]
                              [phs (hash-set (hasheqv) start-i (make-placeholder #f))])
                     (match (hash-ref instructions i)
@@ -291,11 +298,19 @@
                       [`(done)
                        (placeholder-set! (hash-ref phs i) (list))
                        phs]))])
+
+         ; this loop does a pass to fix instructions whose successor
+         ; isn't simply the next instruction
+         ; these instructions include terminal instructions,
+         ; such as err, return, and retsub,
+         ; and branching instructions,
+         ; such as bnz, bz, and callsub.
+         ; it also inlines b instructions
          (let loop ([i start-i])
            (match (hash-ref instructions i)
              [`(succ ,instr ,next-i)
               (match instr
-                [(list (and code (or 'bnz 'bz 'b 'callsub))
+                [(list (and code (or 'bnz 'bz 'callsub))
                        pc)
                  (cond
                    [(hash-ref phs pc #f)
@@ -305,8 +320,14 @@
                                                  (hash-ref phs next-i))))]
                    [else
                     (error 'disassemble "jump to global offset ~a not on instruction boundary" pc)])]
-                [(or `(err) `(return))
+                [(or `(err)
+                     `(retsub)
+                     `(return))
                  (placeholder-set! (hash-ref phs i) (cons instr (list)))]
+                [`(b ,pc)
+                 ; don't set it to the contents of the destination placeholder
+                 ; because those might be changed by this loop
+                 (placeholder-set! (hash-ref phs i) (hash-ref phs pc))]
                 [_
                  (void)])
               (loop next-i)]
