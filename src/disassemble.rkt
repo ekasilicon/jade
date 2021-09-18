@@ -255,8 +255,8 @@
                                                  (hash-ref phs next-i))))]
                    [else
                     (error 'disassemble "jump to global offset ~a not on instruction boundary" pc)])]
-                [(list (and code (or 'err 'return)))
-                 (placeholder-set! (hash-ref phs i) (list (list code)))]
+                [(or `(err) `(return))
+                 (placeholder-set! (hash-ref phs i) (cons instr (list)))]
                 [_
                  (void)])
               (loop next-i)]

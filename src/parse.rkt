@@ -601,6 +601,8 @@ EOF
                                       [`(label ,ℓ)
                                        (placeholder-set! ph next-ph)
                                        (hash-set phs ℓ next-ph)]
+                                      [`(or `(err) `(return))
+                                       (placeholder-set! ph (cons instr (list)))]
                                       [_
                                        (placeholder-set! ph (cons instr next-ph))
                                        phs])])
