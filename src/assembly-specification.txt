@@ -1,11 +1,4 @@
-program
-[*(line)]
-
 line
-(content)[* ][?\r]\n
-(content)[* ]
-
-content
 (pragma)
 (comment)
 (instruction)

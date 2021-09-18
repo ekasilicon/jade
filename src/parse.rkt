@@ -181,11 +181,15 @@
 
 ; bytes
 
+(require file/sha1)
+
 (define pbytes
   (∨ (>> (literal "base64")
          space+
          (>>= (p* (cc (^ "\r\n")))
-              (lift (λ (cs) (apply string cs)))))))
+              (lift (λ (cs) (apply string cs)))))
+     (>> (literal "0x")
+         (>>= (p* (cc hex-digit?)) (lift (λ (cs) (hex-string->bytes (apply string cs))))))))
 
 #|
 bytes
@@ -580,7 +584,44 @@ EOF
   (require racket/port
            racket/pretty)
   (let ([input (port->string (current-input-port))])
-    (pretty-print (time (parse input)))))
+    (let ([instructions (time (parse input))])
+      (let ([initial-ph (make-placeholder #f)])
+        (let ([phs (let loop ([instructions instructions]
+                              [ph initial-ph]
+                              [phs (hasheq)])
+                     (match instructions
+                       [(list)
+                        (placeholder-set! ph (list))
+                        phs]
+                       [(cons instr instructions)
+                        (let* ([next-ph (make-placeholder #f)]
+                               [phs (match instr
+                                      [`(label ,ℓ)
+                                       (placeholder-set! ph next-ph)
+                                       (hash-set phs ℓ next-ph)]
+                                      [_
+                                       (placeholder-set! ph (cons instr next-ph))
+                                       phs])])
+                          (loop instructions next-ph phs))]))])
+          (let loop ([ph initial-ph])
+            (match (placeholder-get ph)
+              [(? placeholder? ph)
+               (loop ph)]
+              [(list)
+               (void)]
+              [(cons instr next-ph)
+               (match instr
+                 [(list (and code (or 'bnz 'bz 'b 'callsub)) ℓ)
+                  (cond
+                    [(hash-ref phs ℓ #f)
+                     => (λ (is-ph)
+                          (placeholder-set! ph (cons (list code is-ph) next-ph)))]
+                    [else
+                     (error 'parse "unknown label ~a" ℓ)])]
+                 [_
+                  (void)])
+               (loop next-ph)]))
+          (pretty-print (make-reader-graph initial-ph)))))))
 
 (module+ test
   (parse
