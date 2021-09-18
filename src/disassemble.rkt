@@ -88,8 +88,24 @@
   (>>= read-uint8
        (lift
         (match-lambda
+          [0  'Sender]
+          [7  'Receiver]
+          [8  'Amount]
+          [17 'XferAsset]
+          [18 'AssetAmount]
+          [20 'AssetReceiver]
+          [24 'ApplicationID]
+          [25 'OnCompletion]
           [26 'ApplicationArgs]
           [27 'NumAppArgs]))))
+
+(define global-field
+  (>>= read-uint8
+       (lift
+        (match-lambda
+          [3  'ZeroAddress]
+          [4  'GroupSize]
+          [7  'LatestTimestamp]))))
 
 (define destination
   (>>= read-int16
@@ -103,11 +119,17 @@
 (define disassemble-instruction
   (>>= read-opcode
        (match-lambda
-         [#x08 (unit `(+))]
-         [#x0a (unit `(/))]
-         [#x0d (unit '(>))]
+         [#x00 (unit `(err))]
          [#x01 (unit `(sha256))]
+         [#x08 (unit `(+))]
+         [#x09 (unit `(-))]
+         [#x0a (unit `(/))]
+         [#x0d (unit `(>))]
+         [#x0e (unit `(<=))]
+         [#x0f (unit `(>=))]
+         [#x10 (unit `(&&))]
          [#x12 (unit `(==))]
+         [#x13 (unit `(!=))]
          [#x17 (unit `(btoi))]
          [#x18 (unit `(%))]
          [#x1a (unit `(&))]
@@ -122,11 +144,31 @@
                                  (>>= (loop (sub1 n))
                                       (λ (xs) (unit (cons x xs))))))))))
                (λ (ns) (unit `(intcblock . ,ns))))]
+         [#x21 (>>= read-uint8 (λ (i) (unit `(intc ,i))))]
          [#x22 (unit `(intc_0))]
          [#x23 (unit `(intc_1))]
          [#x24 (unit `(intc_2))]
+         [#x25 (unit `(intc_3))]
+         [#x26
+          (>>= (>>= read-varuint
+                    (λ (n)
+                      (let loop ([n n])
+                        (if (zero? n)
+                          (unit (list))
+                          (>>= read-bytes
+                               (λ (bs)
+                                 (>>= (loop (sub1 n))
+                                      (λ (bss) (unit (cons bs bss))))))))))
+               (λ (bss) (unit `(bytecblock . ,bss))))]
+         [#x27 (>>= read-uint8 (λ (i) (unit `(bytec ,i))))]
+         [#x28 (unit `(bytec_0))]
+         [#x29 (unit `(bytec_1))]
+         [#x2a (unit `(bytec_2))]
+         [#x2b (unit `(bytec_3))]
          [#x31
           (>>= transaction-field (λ (f) (unit `(txn ,f))))]
+         [#x32
+          (>>= global-field (λ (f) (unit `(global ,f))))]
          [#x34
           (>>= read-uint8 (λ (i) (unit `(load ,i))))]
          [#x35
@@ -137,14 +179,20 @@
                  (>>= read-uint8
                       (λ (ai)
                         (unit `(txna ,f ,ai))))))]
+         [#x38
+          (>>= transaction-field (λ (f) (unit `(gtxns ,f))))]
          [#x40
           (>>= destination (λ (dst) (unit `(bnz ,dst))))]
          [#x42
           (>>= destination (λ (dst) (unit `(b ,dst))))]
          [#x43 (unit `(return))]
+         [#x44 (unit `(assert))]
          [#x50 (unit `(concat))]
          [#x52 (unit `(substring3))]
+         [#x62 (unit `(app_local_get))]
+         [#x64 (unit `(app_global_get))]
          [#x65 (unit `(app_global_get_ex))]
+         [#x66 (unit `(app_local_put))]
          [#x67 (unit `(app_global_put))]
          [#x80
           (>>= read-bytes (λ (bs) (unit `(pushbytes ,bs))))]
@@ -207,50 +255,12 @@
                                                  (hash-ref phs next-i))))]
                    [else
                     (error 'disassemble "jump to global offset ~a not on instruction boundary" pc)])]
+                [(list (and code (or 'err 'return)))
+                 (placeholder-set! (hash-ref phs i) (list (list code)))]
                 [_
                  (void)])
               (loop next-i)]
              [`(done)
               (void)]))
          (pretty-print
-          (make-reader-graph (hash-ref phs start-i))))
-       #;
-       (let loop ([i (hash-ref s 'initial)]
-                  [phs (hasheqv)])
-         (match (hash-ref instructions i)
-           [`(succ ,instr ,next-i)
-            (let* ([phs (if (hash-has-key? phs i)
-                          phs
-                          (hash-set phs i (make-placeholder #f)))]
-                   [ph (hash-ref phs i)])
-              (placeholder-set! i (cons )))
-            (let ([ph (hash-ref phs i (make-placeholder #f))])
-              )
-            (let ([ph (make-placeholder #f)]))
-            (placeholder-set! (hash-ref resolved i) `(cons))]
-           )
-         )
-       #;
-       (if (andmap (λ (dst) (hash-has-key? instructions dst)) (hash-ref s 'destinations))
-         (pretty-print
-          (let loop ([i (hash-ref s 'initial)]
-                    [resolved (hasheqv)])
-           (if (hash-has-key? resolved i)
-             resolved
-             (match (hash-ref instructions i)
-               [`(succ ,instr ,new-i)
-                (let ([resolved (loop new-i (hash-set resolved i #f))])
-                  (hash-set resolved i (cons instr (hash-ref resolved new-i))))]
-               [`(done)
-                (hash-set resolved i (list))]))
-           ))
-         
-         (error 'disassemble "jump target not on instruction boundary")))
-     #;
-     (pretty-print
-      
-      (foldl
-       (λ ())
-       (hasheqv)
-       ))
-     ]))
+          (make-reader-graph (hash-ref phs start-i)))))]))

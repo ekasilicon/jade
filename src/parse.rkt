@@ -31,6 +31,8 @@
          [`(success ,xs ,i)
           `(success ,xs ,i)]
          [`(failure ,msg)
+          `(failure ,msg)
+          #;
           (error 'parse "alternate returns a failure with message ~s" msg)]
          [#f
           (loop ps)])])))
