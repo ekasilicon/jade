@@ -1,8 +1,9 @@
 #lang racket/base
+(require "record.rkt")
 
-(struct Monad (unit >>= >>))
+(record Monad (unit >>= >>))
 
-(struct MonadPlus (Monad mzero mplus))
+(record MonadPlus (Monad mzero mplus))
 
 (provide Monad
          MonadPlus)

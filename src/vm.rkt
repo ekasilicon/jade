@@ -1,70 +1,73 @@
 #lang racket/base
 (require racket/match
+         "record.rkt"
          "monad.rkt"
          "read-byte.rkt")
 
-(struct VM (MonadPlus ReadByte
-                      panic
-                      return!
-                      logic-sig-version
-                      in-mode
-                      get-pc
-                      set-pc
-                      get-bytecode
-                      get-intcblock
-                      put-intcblock
-                      get-bytecblock
-                      put-bytecblock
-                      push
-                      pop
-                      push-call
-                      pop-call
-                      sha256
-                      +
-                      -
-                      /
-                      *
-                      len
-                      itob
-                      btoi
-                      %
-                      mulw
-                      addw
-                      divmodw
-                      is-zero
-                      &&
-                      !!
-                      =
-                      <
-                      !
-                      ~
-                      concat
-                      substring
-                      getbyte
-                      global
-                      transaction
-                      group-transaction
-                      transaction-array
-                      group-transaction-array
-                      load
-                      store
-                      balance
-                      min-balance
-                      app-local-get
-                      app-local-put
-                      app-local-del
-                      app-local-get-ex
-                      app-global-get
-                      app-global-put
-                      app-global-get-ex
-                      asset-holding-get
-                      asset-params-get
-                      bzero
-                      check-final))
+(record VM (MonadPlus
+            ReadByte
+            panic
+            return!
+            logic-sig-version
+            in-mode
+            get-pc
+            set-pc
+            get-bytecode
+            get-intcblock
+            put-intcblock
+            get-bytecblock
+            put-bytecblock
+            push
+            pop
+            push-call
+            pop-call
+            sha256
+            +
+            -
+            /
+            *
+            len
+            itob
+            btoi
+            %
+            mulw
+            addw
+            divmodw
+            is-zero
+            &&
+            \|\|
+            =
+            <
+            !
+            ~
+            concat
+            substring
+            getbyte
+            global
+            transaction
+            group-transaction
+            transaction-array
+            group-transaction-array
+            load
+            store
+            balance
+            min-balance
+            app-local-get
+            app-local-put
+            app-local-del
+            app-local-get-ex
+            app-global-get
+            app-global-put
+            app-global-get-ex
+            asset-holding-get
+            asset-params-get
+            bzero
+            check-final))
 
 ; execute : VM m s => byte → m ()
 (define (execute vm)
-  (match-define (VM (MonadPlus (Monad unit >>= >>) _ _) rb
+  (match-define (VM [MonadPlus (MonadPlus [Monad (Monad unit >>= >>)])]
+                    [ReadByte rb]
                     panic
                     return!
                     logic-sig-version
@@ -81,10 +84,10 @@
                     push-call
                     pop-call
                     sha256
-                    vm+
-                    vm-
-                    vm/
-                    vm*
+                    [+ vm+]
+                    [- vm-]
+                    [/ vm/]
+                    [* vm*]
                     len
                     itob
                     btoi
@@ -94,11 +97,11 @@
                     divmodw
                     is-zero
                     &&
-                    !!
-                    vm=
-                    vm<
-                    vm!
-                    vm~
+                    \|\|
+                    [= vm=]
+                    [< vm<]
+                    [! vm!]
+                    [~ vm~]
                     concat
                     substring
                     getbyte
@@ -120,9 +123,8 @@
                     app-global-get-ex
                     asset-holding-get
                     asset-params-get
-                    bzero
-                    _ ; check-final
-                    ) vm)
+                    bzero)
+    vm)
   (define lsv>= (logic-sig-version>= vm))
   (define (lookup-intcblock i)
     (>>= get-intcblock
@@ -176,8 +178,7 @@
     [#x00 ; err
      (panic "err")]
     [#x01 ; sha256
-     (stack-apply sha256 1)
-     ]
+     (stack-apply sha256 1)]
     [#x08 ; +
      (stack-apply vm+ 2)]
     [#x09 ; -
@@ -209,7 +210,7 @@
     [#x10 ; &&
      (stack-apply && 2)]
     [#x11 ; ||
-     (stack-apply !! 2)]
+     (stack-apply \|\| 2)]
     [#x12 ; ==
      (stack-apply vm= 2)]
     [#x13 ; !=
@@ -389,7 +390,7 @@
      (>> (lsv>= 3 "swap")
          swap)]
     [#x4d ; select
-     (>> (lsv>= 3 "swap")
+     (>> (lsv>= 3 "select")
          (>>= pop
               (λ (c)
                 (>>= pop
@@ -404,10 +405,10 @@
     [#x51 ; substring
      (>> (lsv>= 2 "substring")
          (>>= (>>= (read-uint8 rb)
-                 (λ (s)
-                   (>>= (read-uint8 rb)
-                        (λ (e)
-                          (>>= pop (λ (a) (substring a s e)))))))
+                   (λ (s)
+                     (>>= (read-uint8 rb)
+                          (λ (e)
+                            (>>= pop (λ (a) (substring a s e)))))))
               push))]
     [#x52 ; substring3
      (>> (lsv>= 2 "substring3")
@@ -480,8 +481,7 @@
          (>>= pop-call goto))]
     [#xaf ; bzero
      (>> (lsv>= 4 "bzero")
-         (stack-apply bzero 1))
-     ]
+         (stack-apply bzero 1))]
     [bc
      (display "0x")
      (displayln (number->string bc 16))
@@ -489,79 +489,25 @@
 
 ; step : VM m s => m ()
 (define (step vm)
-  (match-define (VM (MonadPlus (Monad _ >>= >>) _ _) rb
-                    _ ; panic
-                    _ ; return!
-                    _ ; logic-sig-version
-                    _ ; in-mode
-                    _ ; get-pc
-                    _ ; set-pc
-                    _ ; get-bytecode
-                    _ ; get-intcblock
-                    _ ; put-intcblock
-                    _ ; get-bytecblock
-                    _ ; put-bytecblock
-                    _ ; push
-                    _ ; pop
-                    _ ; push-call
-                    _ ; pop-call
-                    _ ; sha256
-                    _ ; +
-                    _ ; -
-                    _ ; /
-                    _ ; *
-                    _ ; len
-                    _ ; itob
-                    _ ; btoi
-                    _ ; %
-                    _ ; mulw
-                    _ ; addw
-                    _ ; divmodw
-                    _ ; is-zero
-                    _ ; &&
-                    _ ; !!
-                    _ ; =
-                    _ ; <
-                    _ ; !
-                    _ ; ~
-                    _ ; concat
-                    _ ; substring
-                    _ ; getbyte
-                    _ ; transaction
-                    _ ; global
-                    _ ; group-transaction
-                    _ ; transaction-array
-                    _ ; group-transaction-array
-                    _ ; load
-                    _ ; store
-                    _ ; balance
-                    _ ; min-balance
-                    _ ; app-local-get
-                    _ ; app-local-put
-                    _ ; app-local-del
-                    _ ; app-local-get-ex
-                    _ ; app-global-get
-                    _ ; app-global-put
-                    _ ; app-global-get-ex
-                    _ ; asset-holding-get
-                    _ ; asset-params-get
-                    _ ; bzero
-                    check-final
-                    ) vm)
+  (match-define (VM [MonadPlus (MonadPlus [Monad (Monad >>= >>)])]
+                    [ReadByte rb]
+                    check-final)
+    vm)
   (>> (>>= (read-opcode rb)
            (execute vm))
       check-final))
 
 (define (logic-sig-version>= vm)
-  (match-let ([(MonadPlus (Monad unit >>= _) _ _) (VM-MonadPlus vm)]
-              [logic-sig-version (VM-logic-sig-version vm)]
-              [panic (VM-panic vm)])
-    (λ (target-lsv info)
-      (>>= logic-sig-version
-           (λ (lsv)
-             (if (>= lsv target-lsv)
-               (unit)
-               (panic "LogicSig version = ~a but need >= ~a for ~a" lsv target-lsv info)))))))
+  (match-define (VM [MonadPlus (MonadPlus [Monad (Monad unit >>=)])]
+                    logic-sig-version
+                    panic)
+    vm)
+  (λ (target-lsv info)
+    (>>= logic-sig-version
+         (λ (lsv)
+           (if (>= lsv target-lsv)
+             (unit)
+             (panic "LogicSig version = ~a but need >= ~a for ~a" lsv target-lsv info))))))
 
 (provide VM
          step

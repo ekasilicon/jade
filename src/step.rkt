@@ -31,23 +31,23 @@
 ; (define-type (Step a) (→ (State) (Result a))
 
 (define Step-Monad
-  (Monad (λ xs (λ (st) (list (underway xs st))))
-         (λ (m f)
-           (λ (st)
-             (append-map
-              (match-lambda
-               [(underway xs st)
-                ((apply f xs) st)]
-               [r (list r)])
-              (m st))))
-         (λ (m₀ m₁)
-           (λ (st)
-             (append-map
-              (match-lambda
-                [(underway xs st)
-                 (m₁ st)]
-                [r (list r)])
-              (m₀ st))))))
+  (Monad [unit (λ xs (λ (st) (list (underway xs st))))]
+         [>>= (λ (m f)
+                (λ (st)
+                  (append-map
+                   (match-lambda
+                     [(underway xs st)
+                      ((apply f xs) st)]
+                     [r (list r)])
+                   (m st))))]
+         [>> (λ (m₀ m₁)
+               (λ (st)
+                 (append-map
+                  (match-lambda
+                    [(underway xs st)
+                     (m₁ st)]
+                    [r (list r)])
+                  (m₀ st))))]))
 
 (define ((return x) st)
   (list (returned x)))
@@ -74,21 +74,21 @@
      (λ (st) (list (underway (list) (hash-update st 'key f iv))))]))
 
 (define Step-MonadPlus
-  (MonadPlus Step-Monad
-             (λ (st) (list))
-             (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))))
+  (MonadPlus [Monad Step-Monad]
+             [mzero (λ (st) (list))]
+             [mplus (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))]))
 
 (define Step-ReadByte
   (match-let ([(Monad unit >>= >>) Step-Monad])
-    (ReadByte Step-Monad
-              (>>= (get bytecode)
-                   (λ (bc)
-                     (>>= (get pc)
-                          (λ (pc)
-                            (if (>= pc (bytes-length bc))
-                              (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
-                              (>> (update pc add1)
-                                  (unit (bytes-ref bc pc)))))))))))
+    (ReadByte [Monad Step-Monad]
+              [read-byte (>>= (get bytecode)
+                              (λ (bc)
+                                (>>= (get pc)
+                                     (λ (pc)
+                                       (if (>= pc (bytes-length bc))
+                                         (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
+                                         (>> (update pc add1)
+                                             (unit (bytes-ref bc pc))))))))])))
 
 (define-match-expander uint64
   (syntax-rules ()
@@ -102,7 +102,7 @@
 
 ; instance VM <hash-thing>
 (define Step-VM
-  (match-let ([(MonadPlus (Monad unit >>= >>) mzero mplus) Step-MonadPlus])
+  (match-let ([(MonadPlus [Monad (Monad unit >>= >>)] mzero mplus) Step-MonadPlus])
     (define (interpretation #:assume assume #:reject reject)
       (match-lambda
         [`(¬ ,c) (reject c)]
@@ -355,270 +355,239 @@
              (if (eq? gi 'this-group-index)
                (unit `(,f ,ai))
                (unit `(txn ,gi ,f ,ai))))))
-    (VM Step-MonadPlus Step-ReadByte
-        ; panic
+    (VM [MonadPlus Step-MonadPlus]
+        [ReadByte Step-ReadByte]
         panic
-        ; return!
-        return
-        ; logic-sig-version
-        (get logic-sig-version)
-        ; in-mode
+        [return! return]
+        [logic-sig-version (get logic-sig-version)]
         ; could (assume `(= ApplicationMode ,target-mode)) and work the metalogic out with a custom interpretation
-        (λ (target-mode info)
-          (>>= (get mode #f)
-               (match-lambda
-                 [#f
-                  (set mode target-mode)]
-                 [mode
-                  (if (eq? mode target-mode)
-                    (unit)
-                    (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))
-        ; get-pc
-        (get pc)
-        ; set-pc
-        (λ (pc) (set pc pc))
-        ; get-bytecode
-        (get bytecode)
-        ; get-intcblock
-        (get intcblock)
-        ; put-intcblock
-        (λ (xs) (set intcblock xs))
-        ; get-bytecblock
-        (get bytecblock)
-        ; put-bytecblock
-        (λ (bss) (set bytecblock bss))
-        ; push
+        [in-mode (λ (target-mode info)
+                   (>>= (get mode #f)
+                        (match-lambda
+                          [#f
+                           (set mode target-mode)]
+                          [mode
+                           (if (eq? mode target-mode)
+                             (unit)
+                             (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))] 
+        [get-pc (get pc)]
+        [set-pc (λ (pc) (set pc pc))]
+        [get-bytecode (get bytecode)]
+        [get-intcblock (get intcblock)]
+        [put-intcblock (λ (xs) (set intcblock xs))]
+        [get-bytecblock (get bytecblock)]
+        [put-bytecblock (λ (bss) (set bytecblock bss))]
         push
-        ; pop
         pop
-        ; push-call
-        (λ (ret-pc) (update call-stack (λ (pcs) (cons ret-pc pcs))))
-        ; pop-call
-        (>>= (get call-stack)
-             (match-lambda
-               [(cons pc pcs)
-                (>> (set call-stack pcs)
-                    (unit pc))]))
-        ; sha256
-        (λ (x) (unit `(sha256 ,x)))
-        ; +
-        (λ (x y)
-          (>>= (uint64-op2 '+ + x y)
-               (λ (z)
-                 (>> (log "using symbolic constant (exp 2 64) for +")
-                     (sif (<rw `(< ,z (exp 2 64)))
-                          (unit z)
-                          (panic "~a + ~a overflows" x y))))))
-        ; -
-        (λ (x y)
-          (sif (<rw `(<= ,x ,y))
-               (uint64-op2 '- - x y)
-               (panic "-: ~a > ~a" y x)))
-        ; /
-        ; XXX handle divide by zero
-        (λ (x y)
-          (sif y
-               (unit `(/ ,x ,y))
-               (panic "/: ~a is zero" y)))
-        ; *
-        (λ (x y)
-          (>>= (uint64-op2 '* * x y)
-               (λ (z)
-                 (>> (log "using symbolic constant (exp 2 64) for *")
-                     (sif (<rw `(< ,z (exp 2 64)))
-                          (unit z)
-                          (panic "~a * ~a overflows" x y))))))
-        ; len
-        (λ (x) (unit `(len ,x)))
-        ; itob
-        (λ (x) (unit `(itob ,x)))
-        ; btoi
-        (λ (x)
-          (sif (<rw `(<= (len ,x) 8))
-               (unit `(btoi ,x))
-               (panic "btoi: input greater than 8 bytes")))
-        ; %
-        ; XXX handle % by zero
-        (λ (x y) (unit `(% ,x ,y)))
-        ; mulw
-        (λ (a b)
-          (cond
-            [(and (exact-nonnegative-integer? a)
-                  (exact-nonnegative-integer? b))
-             (let ([c (* a b)])
-               (>> (push (arithmetic-shift c -64))
-                   (push (bitwise-and c (sub1 (expt 2 64))))))]
-            [else
-             (>> (push `(hi (mulw ,a ,b)))
-                 (push `(lo (mulw ,a ,b))))]))
-        ; addw
+        [push-call (λ (ret-pc) (update call-stack (λ (pcs) (cons ret-pc pcs))))]
+        [pop-call (>>= (get call-stack)
+                       (match-lambda
+                         [(cons pc pcs)
+                          (>> (set call-stack pcs)
+                              (unit pc))]))]
+        [sha256 (λ (x) (unit `(sha256 ,x)))]
+        [+
+         (λ (x y)
+           (>>= (uint64-op2 '+ + x y)
+                (λ (z)
+                  (>> (log "using symbolic constant (exp 2 64) for +")
+                      (sif (<rw `(< ,z (exp 2 64)))
+                           (unit z)
+                           (panic "~a + ~a overflows" x y))))))]
+        [-
+         (λ (x y)
+           (sif (<rw `(<= ,x ,y))
+                (uint64-op2 '- - x y)
+                (panic "-: ~a > ~a" y x)))]
+        [/
+         (λ (x y)
+           (sif y
+                (unit `(/ ,x ,y))
+                (panic "/: ~a is zero" y)))]
+        [*
+         (λ (x y)
+           (>>= (uint64-op2 '* * x y)
+                (λ (z)
+                  (>> (log "using symbolic constant (exp 2 64) for *")
+                      (sif (<rw `(< ,z (exp 2 64)))
+                           (unit z)
+                           (panic "~a * ~a overflows" x y))))))]
+        [len (λ (x) (unit `(len ,x)))]
+        [itob (λ (x) (unit `(itob ,x)))]
+        [btoi
+         (λ (x)
+           (sif (<rw `(<= (len ,x) 8))
+                (unit `(btoi ,x))
+                (panic "btoi: input greater than 8 bytes")))]
+        [%
+         (λ (x y)
+           (sif y
+                (unit `(% ,x ,y))
+                (panic "%: ~a is zero" y)))]
+        [mulw
+         (λ (a b)
+           (cond
+             [(and (exact-nonnegative-integer? a)
+                   (exact-nonnegative-integer? b))
+              (let ([c (* a b)])
+                (>> (push (arithmetic-shift c -64))
+                    (push (bitwise-and c (sub1 (expt 2 64))))))]
+             [else
+              (>> (push `(hi (mulw ,a ,b)))
+                  (push `(lo (mulw ,a ,b))))]))]
         ; XXX handle literals
-        (λ (a b)
-          (>> (push `(hi (addw ,a ,b)))
-              (push `(lo (addw ,a ,b)))))
-        ; divmodw
-        (λ (a b c d)
-          (let ([dend (match* (a b)
-                        [((? exact-nonnegative-integer?) (? exact-nonnegative-integer?))
-                         (bitwise-ior (* a (expt 2 64)) b)]
-                        [(`(hi ,x) `(lo ,x)) x]
-                        [(x y) `(uint128 ,x ,y)])]
-                [isor (match* (c d)
-                        [((? exact-nonnegative-integer?) (? exact-nonnegative-integer?))
-                         (bitwise-ior (* c (expt 2 64)) d)]
-                        [(`(hi ,x) `(lo ,x)) x]
-                        [(x y) `(uint128 ,x ,y)])])
-            (sif isor
-                 (>> (push `(hi (quotient ,dend ,isor)))
-                     (>> (push `(lo (quotient ,dend ,isor)))
-                         (>> (push `(hi (remainder ,dend ,isor)))
-                             (push `(lo (remainder ,dend ,isor))))))
-                 (panic "divmodw by 0"))))
-        ; is-zero
-        (λ (c) (sif c (unit #f) (unit #t)))
-        ; &&
-        (λ (x y) (unit `(∧ ,x ,y)))
-        ; ||
-        (λ (x y) (unit `(∨ ,x ,y)))
-        ; =
-        (λ (x y) (unit `(= ,x ,y)))
-        ; <
-        (λ (x y) (unit `(< ,x ,y)))
-        ; !
-        (match-lambda
-          [`(¬ ,c) (unit c)]
-          [c (unit `(¬ ,c))])
-        ; ~
-        (λ (x) (unit `(~ ,x)))
-        ; concat
-        (λ (x y) (unit `(concat ,x ,y)))
-        ; substring
-        (λ (a s e)
-          (sif (<rw `(∧ (<= ,s ,e)
-                        (<= ,e (len ,a))))
-               (unit `(substring ,a ,s ,e))
-               (panic "substring out of bounds: ~v" `(substring ,a ,s ,e))))
-        ; getbyte
-        (λ (a b)
-          (>> (log "ensure that getbyte has the invariant added here")
-              (sif (<rw `(< ,b (len ,a)))
-                   (unit `(getbyte ,a ,b))
-                   (panic "byte access out of bounds: ~v" `(getbyte ,a ,b)))))
-        ; global
-        (match-lambda
-          [0 ; MinTxnFee
-           (unit 'MinTxnFee)]
-          [3 ; ZeroAddress
-           (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
-               (unit 'ZeroAddress))]
-          [4 ; GroupSize
-           (unit 'GroupSize)]
-          [6 ; Round
-           (>> ((logic-sig-version>= Step-VM) 2 "Round")
-               (unit 'Round))]
-          [7 ; LatestTimestamp
-           (>> ((logic-sig-version>= Step-VM) 2 "LatestTimestamp")
-               (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
-                   (unit 'LatestTimestamp)))]
-          [9 ; CreatorAddress
-           ; "Address of the creator of the current application. Fails if no such application is executing."
-           (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
-               (unit 'CreatorAddress))])
-        ; transaction
-        (λ (fi) (group-transaction 'this-group-index fi))
-        ; group-transaction
+        [addw
+         (λ (a b)
+           (>> (push `(hi (addw ,a ,b)))
+               (push `(lo (addw ,a ,b)))))]
+        [divmodw
+         (λ (a b c d)
+           (let ([dend (match* (a b)
+                         [((? exact-nonnegative-integer?) (? exact-nonnegative-integer?))
+                          (bitwise-ior (* a (expt 2 64)) b)]
+                         [(`(hi ,x) `(lo ,x)) x]
+                         [(x y) `(uint128 ,x ,y)])]
+                 [isor (match* (c d)
+                         [((? exact-nonnegative-integer?) (? exact-nonnegative-integer?))
+                          (bitwise-ior (* c (expt 2 64)) d)]
+                         [(`(hi ,x) `(lo ,x)) x]
+                         [(x y) `(uint128 ,x ,y)])])
+             (sif isor
+                  (>> (push `(hi (quotient ,dend ,isor)))
+                      (>> (push `(lo (quotient ,dend ,isor)))
+                          (>> (push `(hi (remainder ,dend ,isor)))
+                              (push `(lo (remainder ,dend ,isor))))))
+                  (panic "divmodw by 0"))))]
+        [is-zero (λ (c) (sif c (unit #f) (unit #t)))]
+        [&& (λ (x y) (unit `(∧ ,x ,y)))]
+        [\|\| (λ (x y) (unit `(∨ ,x ,y)))]
+        [= (λ (x y) (unit `(= ,x ,y)))]
+        [< (λ (x y) (unit `(< ,x ,y)))]
+        [!
+         (match-lambda
+           [`(¬ ,c) (unit c)]
+           [c (unit `(¬ ,c))])]
+        [~ (λ (x) (unit `(~ ,x)))]
+        [concat (λ (x y) (unit `(concat ,x ,y)))]
+        [substring
+         (λ (a s e)
+           (sif (<rw `(∧ (<= ,s ,e)
+                         (<= ,e (len ,a))))
+                (unit `(substring ,a ,s ,e))
+                (panic "substring out of bounds: ~v" `(substring ,a ,s ,e))))]
+        [getbyte
+         (λ (a b)
+           (>> (log "ensure that getbyte has the invariant added here")
+               (sif (<rw `(< ,b (len ,a)))
+                    (unit `(getbyte ,a ,b))
+                    (panic "byte access out of bounds: ~v" `(getbyte ,a ,b)))))]
+        [global
+         (match-lambda
+           [0 ; MinTxnFee
+            (unit 'MinTxnFee)]
+           [3 ; ZeroAddress
+            (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
+                (unit 'ZeroAddress))]
+           [4 ; GroupSize
+            (unit 'GroupSize)]
+           [6 ; Round
+            (>> ((logic-sig-version>= Step-VM) 2 "Round")
+                (unit 'Round))]
+           [7 ; LatestTimestamp
+            (>> ((logic-sig-version>= Step-VM) 2 "LatestTimestamp")
+                (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
+                    (unit 'LatestTimestamp)))]
+           [9 ; CreatorAddress
+              ; "Address of the creator of the current application. Fails if no such application is executing."
+            (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
+                (unit 'CreatorAddress))])]
+        [transaction (λ (fi) (group-transaction 'this-group-index fi))]
         group-transaction
         ; transaction-array
-        (λ (fi ai) (group-transaction-array 'this-group-index fi ai))
-        ; group-transaction-array
+        [transaction-array (λ (fi ai) (group-transaction-array 'this-group-index fi ai))]
         group-transaction-array
-        ; load
-        (λ (i)
-          (>>= (get scratch-space)
-               (λ (ss)
-                 (cond
-                   [(hash-ref ss i #f) => unit]
-                   [else
-                    (>> (log "Scratch space slot ~a uninitialized. The Go VM implementation produces 0." i)
-                        (unit 0))]))))
-        ; store
-        (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x))))
-        ; balance
-        (λ (acct) (unit `(balance ,acct)))
-        ; min-balance
-        (λ (acct) (unit `(min-balance ,acct)))
-        ; app-local-get
-        (λ (acct key)
-          (>>= (get app-local)
-               (letrec ([lookup (match-lambda
-                                  [(list)
-                                   (unit `(app-local ,acct ,key))]
-                                  [(cons `(put ,put-acct ,put-key ,val)
-                                         al)
-                                   (sif `(∧ (= ,acct ,put-acct)
-                                            (= ,key  ,put-key))
-                                        (unit val)
-                                        (lookup al))])])
-                 lookup)))
-        ; app-local-put
-        (λ (acct key val)
-          (update app-local (λ (al) (cons `(put ,acct ,key ,val) al))))
-        ; app-local-del
-        (λ (acct key)
-          (update app-local (λ (al) (cons `(del ,acct ,key) al))))
-        ; app-local-get-ex
-        (λ (acct app-id key)
-          (>> (push `(app-local ,acct ,app-id ,key))
-              (push `(app-local-exists ,acct ,app-id ,key))))
-        ; app-global-get
-        (λ (key)
-          (>>= (get app-global)
-               (letrec ([lookup (match-lambda
-                                  [(list)
-                                   (unit `(app-global ,key))]
-                                  [(cons `(put ,put-key ,val)
-                                         ag)
-                                   (sif `(= ,key ,put-key)
-                                        (unit val)
-                                        (lookup ag))])])
-                 lookup)))
-        ; app-global-put
-        (λ (key val)
-          (update app-global (λ (ag) (cons `(put ,key ,val) ag))))
-        ; app-global-get-ex
-        (λ (app-id key)
-          (>> (push `(app-global ,app-id ,key))
-              (push `(app-global-exists ,app-id ,key))))
-        ; asset-holding-get
-        (λ (acct asset x)
-          (>>= (match x
-                 [0 (unit 'AssetBalance)]
-                 [1 (unit 'AssetFrozen)])
-               (λ (f)
-                 (>> (push `(asset-holding ,acct ,asset ,f))
-                     (push `(asset-holding-exists ,acct ,asset ,f))))))
-        ; asset-params-get
-        (λ (asset x)
-          (>>= (match x
-                 [3 (unit 'AssetUnitName)])
-               (λ (f)
-                 (>> (push `(asset-params ,asset ,f))
-                     (push `(asset-params-exists ,asset ,f))))))
-        ; bzero
-        (λ (x)
-          (unit `(bzero ,x)))
-        ; check-final
-        (>>= (get bytecode)
-             (λ (bc)
-               (>>= (get pc)
-                    (λ (pc)
-                      (if (= pc (bytes-length bc))
-                        (>>= (get stack)
-                             (match-lambda
-                               [(list) (panic "stack is empty at end of program")]
-                               [(list x) (return x)]
-                               [_ (panic "stack has more than one value at end of program")]))
-                        (unit)))))))))
+        [load
+         (λ (i)
+           (>>= (get scratch-space)
+                (λ (ss)
+                  (cond
+                    [(hash-ref ss i #f) => unit]
+                    [else
+                     (>> (log "Scratch space slot ~a uninitialized. The Go VM implementation produces 0." i)
+                         (unit 0))]))))]
+        [store (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x))))]
+        [balance (λ (acct) (unit `(balance ,acct)))]
+        [min-balance (λ (acct) (unit `(min-balance ,acct)))]
+        [app-local-get
+         (λ (acct key)
+           (>>= (get app-local)
+                (letrec ([lookup (match-lambda
+                                   [(list)
+                                    (unit `(app-local ,acct ,key))]
+                                   [(cons `(put ,put-acct ,put-key ,val)
+                                          al)
+                                    (sif `(∧ (= ,acct ,put-acct)
+                                             (= ,key  ,put-key))
+                                         (unit val)
+                                         (lookup al))])])
+                  lookup)))]
+        [app-local-put
+         (λ (acct key val)
+           (update app-local (λ (al) (cons `(put ,acct ,key ,val) al))))]
+        [app-local-del
+         (λ (acct key)
+           (update app-local (λ (al) (cons `(del ,acct ,key) al))))]
+        [app-local-get-ex
+         (λ (acct app-id key)
+           (>> (push `(app-local ,acct ,app-id ,key))
+               (push `(app-local-exists ,acct ,app-id ,key))))]
+        [app-global-get
+         (λ (key)
+           (>>= (get app-global)
+                (letrec ([lookup (match-lambda
+                                   [(list)
+                                    (unit `(app-global ,key))]
+                                   [(cons `(put ,put-key ,val)
+                                          ag)
+                                    (sif `(= ,key ,put-key)
+                                         (unit val)
+                                         (lookup ag))])])
+                  lookup)))]
+        [app-global-put
+         (λ (key val)
+           (update app-global (λ (ag) (cons `(put ,key ,val) ag))))]
+        [app-global-get-ex
+         (λ (app-id key)
+           (>> (push `(app-global ,app-id ,key))
+               (push `(app-global-exists ,app-id ,key))))]
+        [asset-holding-get
+         (λ (acct asset x)
+           (>>= (match x
+                  [0 (unit 'AssetBalance)]
+                  [1 (unit 'AssetFrozen)])
+                (λ (f)
+                  (>> (push `(asset-holding ,acct ,asset ,f))
+                      (push `(asset-holding-exists ,acct ,asset ,f))))))]
+        [asset-params-get
+         (λ (asset x)
+           (>>= (match x
+                  [3 (unit 'AssetUnitName)])
+                (λ (f)
+                  (>> (push `(asset-params ,asset ,f))
+                      (push `(asset-params-exists ,asset ,f))))))]
+        [bzero (λ (x) (unit `(bzero ,x)))]
+        [check-final
+         (>>= (get bytecode)
+              (λ (bc)
+                (>>= (get pc)
+                     (λ (pc)
+                       (if (= pc (bytes-length bc))
+                         (>>= (get stack)
+                              (match-lambda
+                                [(list) (panic "stack is empty at end of program")]
+                                [(list x) (return x)]
+                                [_ (panic "stack has more than one value at end of program")]))
+                         (unit))))))])))
 
 (module+ main
   (require racket/file

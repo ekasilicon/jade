@@ -7,24 +7,24 @@
 
 ; instance Monad Prefix
 (define read-Monad
-  (Monad (λ (a) (λ (bs) (cons a bs)))
-         (λ (m f)
-           (λ (bs)
-             (match (m bs)
-               [(cons x bs) ((f x) bs)]
-               [#f #f])))
-         (λ (m₀ m₁)
-           (λ (bs)
-             (match (m₀ bs)
-               [(cons _ bs) (m₁ bs)]
-               [#f #f])))))
+  (Monad [unit (λ (a) (λ (bs) (cons a bs)))]
+         [>>= (λ (m f)
+                (λ (bs)
+                  (match (m bs)
+                    [(cons x bs) ((f x) bs)]
+                    [#f #f])))]
+         [>> (λ (m₀ m₁)
+               (λ (bs)
+                 (match (m₀ bs)
+                   [(cons _ bs) (m₁ bs)]
+                   [#f #f])))]))
 
 (define read-ReadByte
-  (ReadByte read-Monad
-            (λ (bs)
-              (if (zero? (bytes-length bs))
-                #f
-                (cons (bytes-ref bs 0) (subbytes bs 1))))))
+  (ReadByte [Monad read-Monad]
+            [read-byte (λ (bs)
+                         (if (zero? (bytes-length bs))
+                           #f
+                           (cons (bytes-ref bs 0) (subbytes bs 1))))]))
 
 (define read-prefix read-varuint)
 

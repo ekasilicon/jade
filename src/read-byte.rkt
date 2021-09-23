@@ -1,24 +1,25 @@
 #lang racket/base
 (require racket/match
+         "record.rkt"
          "monad.rkt")
 
 ; class Monad m => ReadByte
 ; read-byte :: m byte
-(struct ReadByte (Monad read-byte))
+(record ReadByte (Monad read-byte))
 
 ; ReadByte => m byte
 (define (read-opcode rb)
-  (match-define (ReadByte (Monad unit >>= >>) read-byte) rb)
+  (match-define (ReadByte read-byte) rb)
   read-byte)
 
 ; ReadByte => m uint8
 (define (read-uint8 rb)
-  (match-define (ReadByte (Monad unit >>= >>) read-byte) rb)
+  (match-define (ReadByte read-byte) rb)
   read-byte)
 
 ; ReadByte => m int16
 (define (read-int16 rb)
-  (match-define (ReadByte (Monad unit >>= >>) read-byte) rb)
+  (match-define (ReadByte [Monad (Monad unit >>= >>)] read-byte) rb)
   (>>= read-byte
        (λ (bu)
          (>>= read-byte
@@ -31,7 +32,7 @@
 
 ; ReadByte => m varuint
 (define (read-varuint rb)
-  (match-define (ReadByte (Monad unit >>= >>) read-byte) rb)
+  (match-define (ReadByte [Monad (Monad unit >>= >>)] read-byte) rb)
   (>>= read-byte
        (λ (b)
          (if (zero? (bitwise-and b #x80))
@@ -40,7 +41,7 @@
 
 ; ReadByte => m bytes
 (define (read-bytes rb)
-  (match-define (ReadByte (Monad unit >>= >>) read-byte) rb)
+  (match-define (ReadByte [Monad (Monad unit >>= >>)] read-byte) rb)
   (>>= (>>= (read-varuint rb)
             (λ (n)
               (let loop ([n n])

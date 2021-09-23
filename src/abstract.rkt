@@ -24,23 +24,23 @@
 (struct failure! (msg) #:transparent)
 
 (define Abstract-Monad
-  (Monad (λ xs (λ (st) (list (underway xs st))))
-         (λ (m f)
-           (λ (st)
-             (append-map
-              (match-lambda
-               [(underway xs st)
-                ((apply f xs) st)]
-               [r (list r)])
-              (m st))))
-         (λ (m₀ m₁)
-           (λ (st)
-             (append-map
-              (match-lambda
-                [(underway xs st)
-                 (m₁ st)]
-                [r (list r)])
-              (m₀ st))))))
+  (Monad [unit (λ xs (λ (st) (list (underway xs st))))] 
+         [>>= (λ (m f)
+                (λ (st)
+                  (append-map
+                   (match-lambda
+                     [(underway xs st)
+                      ((apply f xs) st)]
+                     [r (list r)])
+                   (m st))))] 
+         [>> (λ (m₀ m₁)
+               (λ (st)
+                 (append-map
+                  (match-lambda
+                    [(underway xs st)
+                     (m₁ st)]
+                    [r (list r)])
+                  (m₀ st))))]))
 
 (define ((return x) st)
   (list (returned x)))
@@ -48,9 +48,9 @@
   (list (failure! (apply format template args))))
 
 (define Abstract-MonadPlus
-  (MonadPlus Abstract-Monad
-             (λ (st) (list))
-             (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))))
+  (MonadPlus [Monad Abstract-Monad]
+             [mzero (λ (st) (list))]
+             [mplus (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))]))
 
 ; field-get : key -> Abstract a
 (define-syntax field-get
@@ -73,28 +73,29 @@
 
 (define Abstract-ReadByte
   (match-let ([(Monad unit >>= >>) Abstract-Monad])
-    (ReadByte Abstract-Monad
-              (>>= (field-get bytecode)
-                   (λ (bc)
-                     (>>= (field-get pc)
-                          (λ (pc)
-                            (if (>= pc (bytes-length bc))
-                              (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
-                              (>> (field-update pc add1)
-                                  (unit (bytes-ref bc pc)))))))))))
+    (ReadByte [Monad Abstract-Monad]
+              [read-byte
+               (>>= (field-get bytecode)
+                    (λ (bc)
+                      (>>= (field-get pc)
+                           (λ (pc)
+                             (if (>= pc (bytes-length bc))
+                               (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
+                               (>> (field-update pc add1)
+                                   (unit (bytes-ref bc pc))))))))])))
 
 
 (require racket/pretty)
 
 (define Abstract-VM
-  (match-let ([(MonadPlus (Monad unit >>= >>) mzero mplus) Abstract-MonadPlus])
+  (match-let ([(MonadPlus [Monad (Monad unit >>= >>)] mzero mplus) Abstract-MonadPlus])
     (define (push x)
       (>>= (field-get pc)
            (λ (pc)
              (>>= (field-get stack)
                   (λ (stk)
-                                        ; address is pc and length of stack (which is stack slot)
-                                        ; put pc on stack to recover that address
+                    ; address is pc and length of stack (which is stack slot)
+                    ; put pc on stack to recover that address
                     (let ([α (cons pc (length stk))])
                       (>> (field-update heap (λ (σ) (hash-update σ
                                                                  α
@@ -183,81 +184,42 @@
              (if (eq? gi 'this-group-index)
                (unit `(,f ,ai))
                (unit `(txn ,gi ,f ,ai))))))
-    (VM Abstract-MonadPlus Abstract-ReadByte
-        1
-        ; 2 return!
-        return
-        ; 3 logic-sig-version
-        (field-get logic-sig-version)
-        4
-        ; 5 get-pc
-        (field-get pc)
-        ; 6 set-pc
-        (λ (pc) (field-set pc pc))
-        ; 7 get-bytecode
-        (field-get bytecode)
-        ; 8 get-intcblock
-        (field-get intcblock)
-        ; 9 put-intcblock
-        (λ (intcs) (field-set intcblock intcs))
-        ; 10 get-bytecblock
-        (field-get bytecblock)
-        ; 11 put-bytecblock
-        (λ (bytecs) (field-set bytecblock bytecs))
-        ; 12 push
+    (VM [MonadPlus Abstract-MonadPlus]
+        [ReadByte Abstract-ReadByte]
+        panic
+        [return! return]
+        [logic-sig-version (field-get logic-sig-version)]
+        [get-pc (field-get pc)]
+        [set-pc (λ (pc) (field-set pc pc))]
+        [get-bytecode (field-get bytecode)]
+        [get-intcblock (field-get intcblock)]
+        [put-intcblock (λ (intcs) (field-set intcblock intcs))]
+        [get-bytecblock (field-get bytecblock)]
+        [put-bytecblock (λ (bytecs) (field-set bytecblock bytecs))]
         push
-        ; 13 pop
         pop
-        14
-        15
-        16
-        17
-        18
-        19
-        20
-        21
-        22
-        ; 23 btoi
-        (λ (x) (unit `(btoi ,x)))
-        24
-        25
-        26
-        27
-        ; 28 is-zero
-        (λ (c) (sif c (unit #f) (unit #t)))
-        ; 29 &&
-        (λ (x y) (unit `(∧ ,x ,y)))
-        ; 30 ||
-        (λ (x y) (unit `(∨ ,x ,y)))
-        ; 31 =
-        (λ (x y) (unit `(= ,x ,y)))
-        32
-        33
-        34
-        35
-        36
-        37
-        ; 38 transaction
-        (λ (fi) (group-transaction 'this-group-index fi))
-        ; 39 group-transaction
+        [btoi (λ (x) (unit `(btoi ,x)))]
+        [is-zero (λ (c) (sif c (unit #f) (unit #t)))]
+        [&& (λ (x y) (unit `(∧ ,x ,y)))]
+        [\|\| (λ (x y) (unit `(∨ ,x ,y)))]
+        [= (λ (x y) (unit `(= ,x ,y)))]
+        [transaction (λ (fi) (group-transaction 'this-group-index fi))]
         group-transaction
-        ; 40 transaction-array
-        (λ (fi ai) (group-transaction-array 'this-group-index fi ai))
-        ; 41 group-transaction-array
+        [transaction-array (λ (fi ai) (group-transaction-array 'this-group-index fi ai))]
         group-transaction-array
-        42 43 44 45 46 47 48 49 50 51 52 53 54 55
-        ; 56 check-final
-        (>>= (field-get bytecode)
-             (λ (bc)
-               (>>= (field-get pc)
-                    (λ (pc)
-                      (if (= pc (bytes-length bc))
-                        (>>= (field-get stack)
-                             (match-lambda
-                               [(list) (panic "stack is empty at end of program")]
-                               [(list x) (return x)]
-                               [_ (panic "stack has more than one value at end of program")]))
-                        (unit)))))))))
+        [check-final
+         (>>= (field-get bytecode)
+              (λ (bc)
+                (>>= (field-get pc)
+                     (λ (pc)
+                       (if (= pc (bytes-length bc))
+                         (>>= (field-get stack)
+                              (match-lambda
+                                [(list) (panic "stack is empty at end of program")]
+                                [(list x) (return x)]
+                                [_ (panic "stack has more than one value at end of program")]))
+                         (unit))))))]
+        )))
 
 (module+ main
   (require racket/set
