@@ -53,9 +53,35 @@
                               (λ (bs) (unit (cons b bs))))))))))
        (λ (bs) (unit (apply bytes bs)))))
 
+(define (read-intcblock rb)
+  (match-define (ReadByte [Monad (Monad unit >>= >>)] read-byte) rb)
+  (>>= (read-varuint rb) 
+       (λ (n)
+         (let loop ([n n])
+           (if (zero? n)
+             (unit (list))
+             (>>= (read-varuint rb) 
+                  (λ (x)
+                    (>>= (loop (sub1 n))
+                         (λ (xs) (unit (cons x xs)))))))))))
+
+(define (read-bytecblock rb)
+  (match-define (ReadByte [Monad (Monad unit >>= >>)] read-byte) rb)
+  (>>= (read-varuint rb) 
+       (λ (n)
+         (let loop ([n n])
+           (if (zero? n)
+             (unit (list))
+             (>>= (read-bytes rb) 
+                  (λ (bs)
+                    (>>= (loop (sub1 n))
+                         (λ (bss) (unit (cons bs bss)))))))))))
+
 (provide ReadByte
          read-opcode
          read-uint8
          read-int16
          read-varuint
-         read-bytes)
+         read-bytes
+         read-intcblock
+         read-bytecblock)

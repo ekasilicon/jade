@@ -6,7 +6,7 @@
 ; bytes? -> (cons a bytes?) | #f
 
 ; instance Monad Prefix
-(define read-Monad
+(define prefix-Monad
   (Monad [unit (λ (a) (λ (bs) (cons a bs)))]
          [>>= (λ (m f)
                 (λ (bs)
@@ -19,8 +19,8 @@
                    [(cons _ bs) (m₁ bs)]
                    [#f #f])))]))
 
-(define read-ReadByte
-  (ReadByte [Monad read-Monad]
+(define prefix-ReadByte
+  (ReadByte [Monad prefix-Monad]
             [read-byte (λ (bs)
                          (if (zero? (bytes-length bs))
                            #f
@@ -28,10 +28,10 @@
 
 (define read-prefix read-varuint)
 
-(provide read-Monad
-         read-ReadByte
+(provide prefix-Monad
+         prefix-ReadByte
          read-prefix)
 
 (module+ main
-  ((read-prefix read-ReadByte) (bytes 127 1 2 3))
-  ((read-prefix read-ReadByte) (bytes 128 127 1 2 3)))
+  ((read-prefix prefix-ReadByte) (bytes 127 1 2 3))
+  ((read-prefix prefix-ReadByte) (bytes 128 127 1 2 3)))

@@ -4,33 +4,14 @@
          (only-in racket/list append-map)
          "monad.rkt"
          "read-byte.rkt"
-         "prefix.rkt"
          "vm.rkt")
-
-(require racket/pretty)
-
-; (: inject (→ (exact-nonnegative-integer? bytes?) State))
-(define (inject lsv bs)
-  (hasheq 'logic-sig-version lsv
-          'bytecode bs
-          'pc 0
-          'stack (list)
-          'intcblock (list)
-          'bytecblock (list)
-          'scratch-space (hasheqv)
-          'path-condition (r:set)
-          'app-local (list) ; at best a map, at worst a sequence of puts
-          'app-global (list)
-          'execution-log (list)
-          'call-stack (list)))
 
 (struct underway (xs state))
 (struct returned (code))
 (struct failure! (msg))
 
 ; (define-type (Step a) (→ (State) (Result a))
-
-(define Step-Monad
+(define step-Monad
   (Monad [unit (λ xs (λ (st) (list (underway xs st))))]
          [>>= (λ (m f)
                 (λ (st)
@@ -73,14 +54,14 @@
     [(_ key f iv)
      (λ (st) (list (underway (list) (hash-update st 'key f iv))))]))
 
-(define Step-MonadPlus
-  (MonadPlus [Monad Step-Monad]
+(define step-MonadPlus
+  (MonadPlus [Monad step-Monad]
              [mzero (λ (st) (list))]
              [mplus (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))]))
 
-(define Step-ReadByte
-  (match-let ([(Monad unit >>= >>) Step-Monad])
-    (ReadByte [Monad Step-Monad]
+(define step-ReadByte
+  (match-let ([(Monad unit >>= >>) step-Monad])
+    (ReadByte [Monad step-Monad]
               [read-byte (>>= (get bytecode)
                               (λ (bc)
                                 (>>= (get pc)
@@ -101,8 +82,8 @@
      (? bytes? x)]))
 
 ; instance VM <hash-thing>
-(define Step-VM
-  (match-let ([(MonadPlus [Monad (Monad unit >>= >>)] mzero mplus) Step-MonadPlus])
+(define step-VM
+  (match-let ([(MonadPlus [Monad (Monad unit >>= >>)] mzero mplus) step-MonadPlus])
     (define (interpretation #:assume assume #:reject reject)
       (match-lambda
         [`(¬ ,c) (reject c)]
@@ -323,21 +304,21 @@
             [22 ; GroupIndex
              (unit 'GroupIndex)]
             [24 ; ApplicationID
-             (>> ((logic-sig-version>= Step-VM) 2 "ApplicationID")
+             (>> ((logic-sig-version>= step-VM) 2 "ApplicationID")
                  (unit 'ApplicationID))]
             [25 ; OnCompletion
              (unit 'OnCompletion)]
             [27 ; NumAppArgs
-             (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+             (>> ((logic-sig-version>= step-VM) 2 "NumAppArgs")
                  (unit 'NumAppArgs))]
             [29 ; NumAccounts
-             (>> ((logic-sig-version>= Step-VM) 2 "NumAccounts")
+             (>> ((logic-sig-version>= step-VM) 2 "NumAccounts")
                  (unit 'NumAccounts))]
             [32 ; 
-             (>> ((logic-sig-version>= Step-VM) 2 "NumAppArgs")
+             (>> ((logic-sig-version>= step-VM) 2 "NumAppArgs")
                  (unit 'RekeyTo))]
             [38 ; ConfigAssetName
-             (>> ((logic-sig-version>= Step-VM) 2 "ConfigAssetName")
+             (>> ((logic-sig-version>= step-VM) 2 "ConfigAssetName")
                  (unit 'ConfigAssetName))])
            (λ (f)
              (if (eq? gi 'this-group-index)
@@ -346,17 +327,17 @@
     (define (group-transaction-array gi fi ai)
       (>>= (match fi
              [26 ; ApplicationArgs
-              (>> ((logic-sig-version>= Step-VM) 2 "ApplicationArgs")
+              (>> ((logic-sig-version>= step-VM) 2 "ApplicationArgs")
                   (unit 'ApplicationArgs))]
              [28 ; Accounts
-              (>> ((logic-sig-version>= Step-VM) 2 "Accounts")
+              (>> ((logic-sig-version>= step-VM) 2 "Accounts")
                   (unit 'Accounts))])
            (λ (f)
              (if (eq? gi 'this-group-index)
                (unit `(,f ,ai))
                (unit `(txn ,gi ,f ,ai))))))
-    (VM [MonadPlus Step-MonadPlus]
-        [ReadByte Step-ReadByte]
+    (VM [MonadPlus step-MonadPlus]
+        [ReadByte step-ReadByte]
         panic
         [return! return]
         [logic-sig-version (get logic-sig-version)]
@@ -491,15 +472,15 @@
            [4 ; GroupSize
             (unit 'GroupSize)]
            [6 ; Round
-            (>> ((logic-sig-version>= Step-VM) 2 "Round")
+            (>> ((logic-sig-version>= step-VM) 2 "Round")
                 (unit 'Round))]
            [7 ; LatestTimestamp
-            (>> ((logic-sig-version>= Step-VM) 2 "LatestTimestamp")
+            (>> ((logic-sig-version>= step-VM) 2 "LatestTimestamp")
                 (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
                     (unit 'LatestTimestamp)))]
            [9 ; CreatorAddress
               ; "Address of the creator of the current application. Fails if no such application is executing."
-            (>> ((logic-sig-version>= Step-VM) 3 "CreatorAddress")
+            (>> ((logic-sig-version>= step-VM) 3 "CreatorAddress")
                 (unit 'CreatorAddress))])]
         [transaction (λ (fi) (group-transaction 'this-group-index fi))]
         group-transaction
@@ -589,6 +570,30 @@
                                 [_ (panic "stack has more than one value at end of program")]))
                          (unit))))))])))
 
+#;
+(require racket/pretty)
+
+#;
+(define (inject lsv bs)
+  (hasheq 'logic-sig-version lsv
+          'bytecode bs
+          'pc 0
+          'stack (list)
+          'intcblock (list)
+          'bytecblock (list)
+          'scratch-space (hasheqv)
+          'path-condition (r:set)
+          'app-local (list) ; at best a map, at worst a sequence of puts
+          'app-global (list)
+          'execution-log (list)
+          'call-stack (list)))
+
+(define (run bytecode)
+  
+  (match ((read-prefix prefix-ReadByte))))
+
+
+#;
 (module+ main
   (require racket/file
            racket/pretty)
@@ -624,7 +629,7 @@
                 [code
                  (printf "RETURN ~v\n" code)
                  (pretty-print (hash-remove st 'bytecode))])])
-           ((step Step-VM) st)))])]))
+           ((step step-VM) st)))])]))
 
 #;
 (= (hi (mulw (+ (+ (txn 4 AssetAmount) 1000) 1)
