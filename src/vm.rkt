@@ -2,7 +2,8 @@
 (require racket/match
          "record.rkt"
          "monad.rkt"
-         "read-byte.rkt")
+         "read-byte.rkt"
+         "instruction.rkt")
 
 (record VM (MonadPlus
             ReadByte
@@ -64,7 +65,7 @@
             bzero
             check-final))
 
-; execute : VM m s => byte → m ()
+; execute : VM m s => Instruction → m ()
 (define (execute vm)
   (match-define (VM [MonadPlus (MonadPlus [Monad (Monad unit >>= >>)])]
                     [ReadByte rb]
@@ -175,15 +176,15 @@
                   (>> (push b)
                       (push a)))))))
   (match-lambda
-    [#x00 ; err
+    [`(err)
      (panic "err")]
-    [#x01 ; sha256
+    [`(sha256)
      (stack-apply sha256 1)]
-    [#x08 ; +
+    [`(+)
      (stack-apply vm+ 2)]
-    [#x09 ; -
+    [`(-)
      (stack-apply vm- 2)]
-    [#x0a ; /
+    [`(/)
      (>>= pop
           (λ (b)
             (>>= pop
@@ -193,38 +194,38 @@
                           (if zero?
                             (panic "/ by 0")
                             (>>= (vm/ a b) push))))))))]
-    [#x0b ; *
+    [`(*)
      (stack-apply vm* 2)]
-    [#x0c ; <
+    [`(<)
      (stack-apply vm< 2)]
-    [#x0d ; >
+    [`(>)
      (>> swap
          (stack-apply vm< 2))]
-    [#x0e ; <=
+    [`(<=)
      (>> (>> swap
              (stack-apply vm< 2))
          (stack-apply vm! 1))]
-    [#x0f ; >=
+    [`(>=)
      (>> (stack-apply vm< 2)
          (stack-apply vm! 1))]
-    [#x10 ; &&
+    [`(&&)
      (stack-apply && 2)]
-    [#x11 ; ||
+    [`(\|\|)
      (stack-apply \|\| 2)]
-    [#x12 ; ==
+    [`(==)
      (stack-apply vm= 2)]
-    [#x13 ; !=
+    [`(!=)
      (>> (stack-apply vm= 2)
          (stack-apply vm! 1))]
-    [#x14 ; !
+    [`(!)
      (stack-apply vm! 1)]
-    [#x15 ; len
+    [`(len)
      (stack-apply len 1)]
-    [#x16 ; itob
+    [`(itob)
      (stack-apply itob 1)]
-    [#x17 ; btoi
+    [`(btoi)
      (stack-apply btoi 1)]
-    [#x18 ; %
+    [`(%)
      (>>= pop
           (λ (b)
             (>>= pop
@@ -234,118 +235,75 @@
                           (if zero?
                             (panic "% by 0")
                             (>>= (% a b) push))))))))]
-    [#x1c ; ~
+    [`(~)
      (stack-apply vm~ 1)]
-    [#x1d ; mulw
+    [`(mulw)
      (>>= pop (λ (b) (>>= pop (λ (a) (mulw a b)))))]
-    [#x1e ; addw
+    [`(addw)
      (>>= pop (λ (b) (>>= pop (λ (a) (addw a b)))))]
-    [#x1f ; divmodw
+    [`(divmodw)
      (>>= pop (λ (d) (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (divmodw a b c d)))))))))]
-    [#x20 ; intcblock
-     (>>= (>>= (read-varuint rb)
-               (λ (n)
-                 (let loop ([n n])
-                   (if (zero? n)
-                     (unit (list))
-                     (>>= (read-varuint rb)
-                          (λ (x)
-                            (>>= (loop (sub1 n))
-                                 (λ (xs) (unit (cons x xs))))))))))
-          put-intcblock)]
-    [#x21 ; intc
-     (>>= (>>= (read-uint8 rb) lookup-intcblock) push)]
-    [#x22 ; intc_0
+    [`(intcblock . ,ns)
+     (put-intcblock ns)]
+    [`(intc ,i)
+     (>>= (lookup-intcblock i) push)]
+    [`(intc_0)
      (>>= (lookup-intcblock 0) push)]
-    [#x23 ; intc_1
+    [`(intc_1)
      (>>= (lookup-intcblock 1) push)]
-    [#x24 ; intc_2
+    [`(intc_2)
      (>>= (lookup-intcblock 2) push)]
-    [#x25 ; intc_3
+    [`(intc_3)
      (>>= (lookup-intcblock 3) push)]
-    [#x26 ; bytecblock
-     (>>= (>>= (read-varuint rb)
-               (λ (n)
-                 (let loop ([n n])
-                   (if (zero? n)
-                     (unit (list))
-                     (>>= (read-bytes rb)
-                          (λ (bs)
-                            (>>= (loop (sub1 n))
-                                 (λ (bss) (unit (cons bs bss))))))))))
-          put-bytecblock)]
-    [#x27 ; bytec
-     (>>= (>>= (read-uint8 rb) lookup-bytecblock) push)]
-    [#x28 ; bytec_0
+    [`(bytecblock . ,bss)
+     (put-bytecblock bss)]
+    [`(bytec ,i)
+     (>>= (lookup-bytecblock i) push)]
+    [`(bytec_0)
      (>>= (lookup-bytecblock 0) push)]
-    [#x29 ; bytec_1
+    [`(bytec_1)
      (>>= (lookup-bytecblock 1) push)]
-    [#x2a ; bytec_2
+    [`(bytec_2)
      (>>= (lookup-bytecblock 2) push)]
-    [#x2b ; bytec_3
+    [`(bytec_3)
      (>>= (lookup-bytecblock 3) push)]
-    [#x31 ; txn
-     (>>= (>>= (read-uint8 rb) transaction) push)]
-    [#x32 ; global
-     (>>= (>>= (read-uint8 rb) global) push)]
-    [#x33 ; gtxn
-     (>>= (>>= (read-uint8 rb)
-               (λ (ti)
-                 (>>= (read-uint8 rb)
-                      (λ (fi)
-                        (group-transaction ti fi)))))
-          push)]
-    [#x34 ; load
-     (>>= (>>= (read-uint8 rb) load) push)]
-    [#x35 ; store
-     (>>= (read-uint8 rb) (λ (i) (>>= pop (λ (x) (store i x)))))]
-    [#x36 ; txna
+    [`(txn ,f)
+     (>>= (transaction f) push)]
+    [`(global ,f)
+     (>>= (global f) push)]
+    [`(gtxn ,gi ,f)
+     (>>= (group-transaction gi f) push)]
+    [`(load ,i)
+     (>>= (load i) push)]
+    [`(store ,i)
+     (>>= pop (λ (x) (store i x)))]
+    [`(txna ,f ,ai)
      (>> (lsv>= 2 "txna")
-         (>>= (>>= (read-uint8 rb)
-                   (λ (fi)
-                     (>>= (read-uint8 rb)
-                          (λ (ai) (transaction-array fi ai)))))
-              push))]
-    [#x37 ; gtxna
-     (>> (lsv>= 2 "txna")
-         (>>= (>>= (read-uint8 rb)
-                   (λ (gi)
-                     (>>= (read-uint8 rb)
-                          (λ (fi)
-                            (>>= (read-uint8 rb)
-                                 (λ (ai) (group-transaction-array gi fi ai))))))) 
-              push))]
-    [#x38 ; gtxns
+         (>>= (transaction-array f ai) push))]
+    [`(gtxna ,gi ,f ,ai)
+     (>>= (group-transaction-array gi f ai) push)]
+    [`(gtxns ,f)
      (>> (lsv>= 3 "gtxns")
-         (>>= (>>= pop
-                   (λ (ti)
-                     (>>= (read-uint8 rb)
-                          (λ (fi)
-                            (group-transaction ti fi)))))
-              push))]
-    [#x40 ; bnz
-     (>>= (read-int16 rb)
-          (λ (offset)
-            (>>= (>>= pop is-zero)
-                 (λ (stay?)
-                   (if stay?
-                     continue
-                     (jump offset))))))]
-    [#x41 ; bz
-     (>>= (read-int16 rb)
-          (λ (offset)
-            (>>= (>>= pop is-zero)
-                 (λ (jump?)
-                   (if jump?
-                     (jump offset)
-                     continue)))))]
-    [#x42 ; b
+         (>>= (>>= pop (λ (gi) (group-transaction gi f))) push))]
+    [`(bnz ,offset)
+     (>>= (>>= pop is-zero)
+          (λ (stay?)
+            (if stay?
+              continue
+              (jump offset))))]
+    [`(bz ,offset)
+     (>>= (>>= pop is-zero)
+          (λ (jump?)
+            (if jump?
+              (jump offset)
+              continue)))]
+    [`(b ,offset)
      (>> (lsv>= 2 "b")
-         (>>= (read-int16 rb) jump))]
-    [#x43 ; return
+         (jump offset))]
+    [`(return)
      (>> (lsv>= 2 "return")
          (>>= pop return!))]
-    [#x44 ; assert
+    [`(assert)
      (>> (lsv>= 3 "assert")
          (>>= pop
               (λ (x)
@@ -354,15 +312,15 @@
                        (if fail?
                          (panic "assert: ~v" x)
                          continue))))))]
-    [#x48 ; pop
+    [`(pop)
      (>> pop
          continue)]
-    [#x49 ; dup
+    [`(dup)
      (>>= pop
           (λ (x)
             (>> (push x)
                 (push x))))]
-    [#x4a ; dup2
+    [`(dup2)
      (>> (lsv>= 2 "dup2")
          (>>= pop
               (λ (b)
@@ -372,24 +330,23 @@
                            (>> (push b)
                                (>> (push a)
                                    (push b)))))))))]
-    [#x4b ; dig
+    [`(dig ,n)
      (>> (lsv>= 3 "dig")
-         (>>= (letrec ([loop (λ (n)
-                               (>>= pop
-                                    (λ (x)
-                                      (if (zero? n)
-                                        (>> (push x)
-                                            (unit x))
-                                        (>>= (loop (sub1 n))
-                                             (λ (y)
-                                               (push x)
-                                               (unit y)))))))])
-                (>>= (read-uint8 rb) loop))
+         (>>= (let loop ([n n])
+                (>>= pop
+                     (λ (x)
+                       (if (zero? n)
+                         (>> (push x)
+                             (unit x))
+                         (>>= (loop (sub1 n))
+                              (λ (y)
+                                (push x)
+                                (unit y)))))))
               push))]
-    [#x4c ; swap
+    [`(swap)
      (>> (lsv>= 3 "swap")
          swap)]
-    [#x4d ; select
+    [`(select)
      (>> (lsv>= 3 "select")
          (>>= pop
               (λ (c)
@@ -399,87 +356,81 @@
                             (λ (a)
                               (>>= (is-zero c)
                                    (λ (zero?) (push (if zero? a b)))))))))))]
-    [#x50 ; concat
+    [`(concat)
      (>> (lsv>= 2 "concat")
          (stack-apply concat 2))]
-    [#x51 ; substring
+    [`(substring ,s ,e)
      (>> (lsv>= 2 "substring")
-         (>>= (>>= (read-uint8 rb)
-                   (λ (s)
-                     (>>= (read-uint8 rb)
-                          (λ (e)
-                            (>>= pop (λ (a) (substring a s e)))))))
+         (>>= (>>= pop (λ (a) (substring a s e)))
               push))]
-    [#x52 ; substring3
+    [`(substring3)
      (>> (lsv>= 2 "substring3")
          (stack-apply substring 3))]
-    [#x55 ; getbyte
+    [`(getbyte)
      (>> (lsv>= 3 "getbyte")
          (stack-apply getbyte 2))]
-    [#x60 ; balance
+    [`(balance)
      (>> (lsv>= 2 "balance")
          (>> (in-mode 'Application "balance")
              (stack-apply balance 1)))]
-    [#x62 ; app_local_get
+    [`(app_local_get)
      (>> (lsv>= 2 "app_local_get")
          (>> (in-mode 'Application "app_local_get")
              (stack-apply app-local-get 2)))]
-    [#x63 ; app_local_get_ex
+    [`(app_local_get_ex)
      (>> (lsv>= 2 "app_local_get_ex")
          (>> (in-mode 'Application "app_local_get_ex")
              (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-get-ex a b c)))))))))]
-    [#x64 ; app_global_get
+    [`(app_global_get)
      (>> (lsv>= 2 "app_global_get")
          (>> (in-mode 'Application "app_global_get")
              (stack-apply app-global-get 1)))]
-    [#x65 ; app_global_get_ex
+    [`(app_global_get_ex)
      (>> (lsv>= 2 "app_global_get_ex")
          (>> (in-mode 'Application "app_global_get_ex")
              (>>= pop (λ (b) (>>= pop (λ (a) (app-global-get-ex a b)))))))]
-    [#x66 ; app_local_put
+    [`(app_local_put)
      (>> (lsv>= 2 "app_local_put")
          (>> (in-mode 'Application "app_local_put")
              (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c)))))))))]
-    [#x67 ; app_global_put
+    [`(app_global_put)
      (>> (lsv>= 2 "app_global_put")
          (>> (in-mode 'Application "app_global_put")
              (>>= pop (λ (b) (>>= pop (λ (a) (app-global-put a b)))))))]
-    [#x68 ; app_local_del
+    [`(app_local_del)
      (>> (lsv>= 2 "app_local_del")
          (>> (in-mode 'Application "app_local_del")
              (>>= pop (λ (b) (>>= pop (λ (a) (app-local-del a b)))))))]
-    [#x70 ; asset_holding_get
+    [`(asset_holding_get)
      (>> (lsv>= 2 "asset_holding_get")
          (>> (in-mode 'Application "asset_holding_get")
              (>>= (read-uint8 rb)
                   (λ (fi) (>>= pop (λ (b) (>>= pop (λ (a) (asset-holding-get a b fi)))))))))]
-    [#x71 ; asset_params_get
+    [`(asset_params_get)
      (>> (lsv>= 2 "asset_params_get")
          (>> (in-mode 'Application "asset_params_get")
              (>>= (read-uint8 rb)
                   (λ (fi) (>>= pop (λ (a) (asset-params-get a fi)))))))]
-    [#x78 ; min_balance
+    [`(min_balance)
      (>> (lsv>= 3 "min_balance")
          (>> (in-mode 'Application "min_balance")
              (stack-apply min-balance 1)))]
-    [#x80 ; pushbytes
+    [`(pushbytes ,bs)
      (>> (lsv>= 3 "pushbytes")
-         (>>= (read-bytes rb) push))]
-    [#x81 ; pushint
+         (push bs))]
+    [`(pushint ,n)
      (>> (lsv>= 3 "pushint")
-         (>>= (read-varuint rb) push))]
-    [#x88 ; callsub
+         (push n))]
+    [`(callsub ,offset)
      (>> (lsv>= 4 "callsub")
-         (>>= (read-int16 rb)
-              (λ (offset)
-                (>>= get-pc
-                     (λ (ret-pc)
-                       (>> (push-call ret-pc)
-                           (goto (+ ret-pc offset))))))))]
-    [#x89 ; retsub
+         (>>= get-pc
+              (λ (ret-pc)
+                (>> (push-call ret-pc)
+                    (jump offset)))))]
+    [`(retsub)
      (>> (lsv>= 4 "retsub")
          (>>= pop-call goto))]
-    [#xaf ; bzero
+    [`(bzero)
      (>> (lsv>= 4 "bzero")
          (stack-apply bzero 1))]
     [bc
@@ -493,7 +444,7 @@
                     [ReadByte rb]
                     check-final)
     vm)
-  (>> (>>= (read-opcode rb)
+  (>> (>>= (read-instruction rb)
            (execute vm))
       check-final))
 

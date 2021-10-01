@@ -1,9 +1,10 @@
 #lang racket/base
 (require racket/match
-         (prefix-in r: racket/set)
+         racket/set
          (only-in racket/list append-map)
          "monad.rkt"
          "read-byte.rkt"
+         "prefix.rkt"
          "vm.rkt")
 
 (struct underway (xs state))
@@ -44,7 +45,7 @@
     [(_ key default)
      (λ (st) (list (underway (list (hash-ref st 'key default)) st)))]))
 ; set : key val -> Step ()
-(define-syntax-rule (set key val)
+(define-syntax-rule (put key val)
   (λ (st) (list (underway (list) (hash-set st 'key val)))))
 ; update : key f -> Step ()
 (define-syntax update
@@ -132,11 +133,11 @@
                                 (>>= (get OnCompletion #f)
                                      (match-lambda
                                        [#f
-                                        (set OnCompletion `(known ,oc))]
+                                        (put OnCompletion `(known ,oc))]
                                        [`(known ,oc₀)
                                         (assume `(= ,oc₀ ,oc))]
                                        [`(unknown ,ocs)
-                                        (for/fold ([m (set OnCompletion `(known, oc))])
+                                        (for/fold ([m (put OnCompletion `(known, oc))])
                                                   ([oc₀ (in-list ocs)])
                                           (>> (reject `(= ,oc₀ ,oc))
                                               m))])))]
@@ -151,13 +152,13 @@
                                 (>>= (get OnCompletion #f)
                                      (match-lambda
                                        [#f
-                                        (set OnCompletion `(unknown ,(list oc)))]
+                                        (put OnCompletion `(unknown ,(list oc)))]
                                        [`(known ,oc₀)
                                         (reject `(= ,oc₀ ,oc))]
                                        [`(unknown ,ocs)
                                         (if (memq oc ocs)
                                           (unit)
-                                          (set OnCompletion `(unknown ,(cons oc ocs))))])))]
+                                          (put OnCompletion `(unknown ,(cons oc ocs))))])))]
                           [`(= ,oc OnCompletion)
                            (recur `(= OnCompletion ,oc))]
                           [_ #f])])
@@ -201,7 +202,7 @@
       (>>= (get stack)
            (match-lambda
              [(cons x stk)
-              (>> (set stack stk)
+              (>> (put stack stk)
                   (unit x))]
              [(list)
               (panic "tried to pop an empty stack")])))
@@ -222,9 +223,9 @@
         [c
          (>>= (get path-condition)
               (λ (pc)
-                (if (r:set-member? pc `(¬ ,c))
+                (if (set-member? pc `(¬ ,c))
                   mzero
-                  (update path-condition (λ (pc) (r:set-add pc c))))))]))
+                  (update path-condition (λ (pc) (set-add pc c))))))]))
     (define reject
       (match-lambda
         [`(¬ ,c)
@@ -242,9 +243,9 @@
         [c
          (>>= (get path-condition)
               (λ (pc)
-                (if (r:set-member? pc c)
+                (if (set-member? pc c)
                   mzero
-                  (update path-condition (λ (pc) (r:set-add pc `(¬ ,c)))))))]))
+                  (update path-condition (λ (pc) (set-add pc `(¬ ,c)))))))]))
     (define <rw
       (match-lambda
         [`(¬ ,c)
@@ -275,63 +276,43 @@
          (unit (list s x y))]))
     (define (log template . args)
       (update execution-log (λ (msgs) (cons (apply format template args) msgs))))
-    (define (group-transaction gi fi)
-      (>>= (match fi
-            [0  ; Sender
-             (unit 'Sender)]
-            [1  ; Fee
-             (unit 'Fee)]
-            [6  ; Lease
-             (unit 'Lease)]
-            [7  ; Receiver
-             (unit 'Receiver)]
-            [8  ; Amount
-             (unit 'Amount)]
-            [9  ; CloseRemainderTo
-             (unit 'CloseRemainderTo)]
-            [16 ; TypeEnum
-             (unit 'TypeEnum)]
-            [17 ; XferAsset
-             (unit 'XferAsset)]
-            [18 ; AssetAmount
-             (unit 'AssetAmount)]
-            [19 ; AssetSender
-             (unit 'AssetSender)]
-            [20 ; AssetReceiver
-             (unit 'AssetReceiver)]
-            [21 ; AssetCloseTo
-             (unit 'AssetCloseTo)]
-            [22 ; GroupIndex
-             (unit 'GroupIndex)]
-            [24 ; ApplicationID
-             (>> ((logic-sig-version>= step-VM) 2 "ApplicationID")
-                 (unit 'ApplicationID))]
-            [25 ; OnCompletion
-             (unit 'OnCompletion)]
-            [27 ; NumAppArgs
-             (>> ((logic-sig-version>= step-VM) 2 "NumAppArgs")
-                 (unit 'NumAppArgs))]
-            [29 ; NumAccounts
-             (>> ((logic-sig-version>= step-VM) 2 "NumAccounts")
-                 (unit 'NumAccounts))]
-            [32 ; 
-             (>> ((logic-sig-version>= step-VM) 2 "NumAppArgs")
-                 (unit 'RekeyTo))]
-            [38 ; ConfigAssetName
-             (>> ((logic-sig-version>= step-VM) 2 "ConfigAssetName")
-                 (unit 'ConfigAssetName))])
+    (define (transaction-field f)
+      (cond
+        [(memq f '(Sender Fee FirstValid FirstValidTime LastValid Note Lease
+                   Receiver Amount CloseRemainderTo VotePK SelectionPK VoteFirst
+                   VoteLast VoteKeyDilution Type TypeEnum XferAsset AssetAmount
+                   AssetSender AssetReceiver AssetCloseTo GroupIndex TxID))
+         (unit f)]
+        [(memq f '(ApplicationID OnCompletion ApplicationArgs NumAppArgs Accounts
+                   NumAccounts ApprovalProgram ClearStateProgram RekeyTo ConfigAsset
+                   ConfigAssetTotal ConfigAssetDecimals ConfigAssetDefaultFrozen
+                   ConfigAssetUnitName ConfigAssetName ConfigAssetURL
+                   ConfigAssetMetadataHash ConfigAssetManager ConfigAssetReserve
+                   ConfigAssetFreeze ConfigAssetClawback FreezeAsset
+                   FreezeAssetAccount FreezeAssetFrozen))
+         (>> ((logic-sig-version>= step-VM) 2 (symbol->string f))
+             (unit f))]
+        [(memq f '(Assets NumAssets Applications NumApplications GlobalNumUint
+                   GlobalNumByteSlice LocalNumUint LocalNumByteSlice))
+         (>> ((logic-sig-version>= step-VM) 3 (symbol->string f))
+             (unit f))]
+        [(memq f '(ExtraProgramPages))
+         (>> ((logic-sig-version>= step-VM) 4 (symbol->string f))
+             (unit f))]
+        [(memq f '(Nonparticipation Logs NumLogs CreatedAssetID
+                   CreatedApplicationID))
+         (>> ((logic-sig-version>= step-VM) 5 (symbol->string f))
+             (unit f))]
+        [else
+         (error 'transaction-field "unknown transaction field ~a" f)]))
+    (define (group-transaction gi f)
+      (>>= (transaction-field f)
            (λ (f)
              (if (eq? gi 'this-group-index)
                (unit f)
                (unit `(txn ,gi ,f))))))
-    (define (group-transaction-array gi fi ai)
-      (>>= (match fi
-             [26 ; ApplicationArgs
-              (>> ((logic-sig-version>= step-VM) 2 "ApplicationArgs")
-                  (unit 'ApplicationArgs))]
-             [28 ; Accounts
-              (>> ((logic-sig-version>= step-VM) 2 "Accounts")
-                  (unit 'Accounts))])
+    (define (group-transaction-array gi f ai)
+      (>>= (transaction-field f)
            (λ (f)
              (if (eq? gi 'this-group-index)
                (unit `(,f ,ai))
@@ -346,25 +327,25 @@
                    (>>= (get mode #f)
                         (match-lambda
                           [#f
-                           (set mode target-mode)]
+                           (put mode target-mode)]
                           [mode
                            (if (eq? mode target-mode)
                              (unit)
                              (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))] 
         [get-pc (get pc)]
-        [set-pc (λ (pc) (set pc pc))]
+        [set-pc (λ (pc) (put pc pc))]
         [get-bytecode (get bytecode)]
         [get-intcblock (get intcblock)]
-        [put-intcblock (λ (xs) (set intcblock xs))]
+        [put-intcblock (λ (xs) (put intcblock xs))]
         [get-bytecblock (get bytecblock)]
-        [put-bytecblock (λ (bss) (set bytecblock bss))]
+        [put-bytecblock (λ (bss) (put bytecblock bss))]
         push
         pop
         [push-call (λ (ret-pc) (update call-stack (λ (pcs) (cons ret-pc pcs))))]
         [pop-call (>>= (get call-stack)
                        (match-lambda
                          [(cons pc pcs)
-                          (>> (set call-stack pcs)
+                          (>> (put call-stack pcs)
                               (unit pc))]))]
         [sha256 (λ (x) (unit `(sha256 ,x)))]
         [+
@@ -463,25 +444,36 @@
                     (unit `(getbyte ,a ,b))
                     (panic "byte access out of bounds: ~v" `(getbyte ,a ,b)))))]
         [global
-         (match-lambda
-           [0 ; MinTxnFee
-            (unit 'MinTxnFee)]
-           [3 ; ZeroAddress
-            (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
-                (unit 'ZeroAddress))]
-           [4 ; GroupSize
-            (unit 'GroupSize)]
-           [6 ; Round
-            (>> ((logic-sig-version>= step-VM) 2 "Round")
-                (unit 'Round))]
-           [7 ; LatestTimestamp
-            (>> ((logic-sig-version>= step-VM) 2 "LatestTimestamp")
-                (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
-                    (unit 'LatestTimestamp)))]
-           [9 ; CreatorAddress
+         (λ (f)
+           (match f
+             [(or 'MinTxnFee 'MinBalance 'MaxTxnLife 'GroupSize)
+              (unit f)]
+             ['ZeroAddress
+              (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
+                  (unit 'ZeroAddress))]
+             ['LogicSigVersion
+              (>> ((logic-sig-version>= step-VM) 2 "LogicSigVersion")
+                  (get logic-sig-version))]
+             ['Round
+              (>> ((logic-sig-version>= step-VM) 2 "Round")
+                  (unit 'Round))]
+             ['LatestTimestamp
+              (>> ((logic-sig-version>= step-VM) 2 "LatestTimestamp")
+                  (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
+                      (unit 'LatestTimestamp)))]
+             ['CurrentApplicationID
+              (>> ((logic-sig-version>= step-VM) 2 "CurrentApplicationID")
+                  (unit 'CurrentApplicationID))]
+             ['CreatorAddress
               ; "Address of the creator of the current application. Fails if no such application is executing."
-            (>> ((logic-sig-version>= step-VM) 3 "CreatorAddress")
-                (unit 'CreatorAddress))])]
+              (>> ((logic-sig-version>= step-VM) 3 "CreatorAddress")
+                  (unit 'CreatorAddress))]
+             ['CurrentApplicationAddress
+              (>> ((logic-sig-version>= step-VM) 5 "CurrentApplicationAddress")
+                  (unit 'CurrentApplicationAddress))]
+             ['GroupID
+              (>> ((logic-sig-version>= step-VM) 5 "GroupID")
+                  (unit 'GroupID))]))]
         [transaction (λ (fi) (group-transaction 'this-group-index fi))]
         group-transaction
         ; transaction-array
@@ -552,7 +544,18 @@
         [asset-params-get
          (λ (asset x)
            (>>= (match x
-                  [3 (unit 'AssetUnitName)])
+                  [0  (unit 'AssetTotal)]
+                  [1  (unit 'AssetDecimals)]
+                  [2  (unit 'AssetDefaultFrozen)]
+                  [3  (unit 'AssetUnitName)]
+                  [4  (unit 'AssetName)]
+                  [5  (unit 'AssetURL)]
+                  [6  (unit 'AssetMetadataHash)]
+                  [7  (unit 'AssetManager)]
+                  [8  (unit 'AssetReserve)]
+                  [9  (unit 'AssetFreeze)]
+                  [10 (unit 'AssetClawback)]
+                  [11 (unit 'AssetCreator)])
                 (λ (f)
                   (>> (push `(asset-params ,asset ,f))
                       (push `(asset-params-exists ,asset ,f))))))]
@@ -573,7 +576,6 @@
 #;
 (require racket/pretty)
 
-#;
 (define (inject lsv bs)
   (hasheq 'logic-sig-version lsv
           'bytecode bs
@@ -582,54 +584,55 @@
           'intcblock (list)
           'bytecblock (list)
           'scratch-space (hasheqv)
-          'path-condition (r:set)
+          'path-condition (set)
           'app-local (list) ; at best a map, at worst a sequence of puts
           'app-global (list)
           'execution-log (list)
           'call-stack (list)))
 
 (define (run bytecode)
-  
-  (match ((read-prefix prefix-ReadByte))))
+  (match ((read-varuint prefix-ReadByte) bytecode)
+    [(cons lsv bs)
+     ; until there are potential loops,
+     ; this does not need to be a fixed point calculation.
+     (let loop ([st (inject lsv bs)]
+                [fs (set)])
+       (foldl
+        (λ (r fs)
+          (match r
+            [(underway (list) st)
+             (loop st fs)]
+            [(failure! msg)
+             fs]
+            [(returned code)
+             (if (zero? code)
+               fs
+               (set-add fs (cons code st)))]))
+        fs
+        ((step step-VM) st)))]
+    [#f
+     (error 'analyze "unable to read initial logic signature version")]))
 
 
-#;
+
 (module+ main
-  (require racket/file
+  (require racket/port
            racket/pretty)
-  
+
+  (for-each
+   (match-lambda
+     [(cons code st)
+      (displayln code)
+      (pretty-print (hash-remove st 'bytecode))])
+   (set->list (run (port->bytes (current-input-port))))) 
+
+  #;
   (match (current-command-line-arguments)
     [(vector filename)
      (displayln filename)
      (match ((read-prefix read-ReadByte) (file->bytes filename))
        [(cons lsv bs)
-        (let loop ([st (inject lsv bs)])
-          #;(pretty-print (hash-remove st 'bytecode))
-          #;
-          (printf "~a: 0x~a\n"
-                  (hash-ref st 'pc)
-                  (number->string (bytes-ref (hash-ref st 'bytecode) (hash-ref st 'pc))
-                                  16))
-          (for-each
-           (match-lambda
-             [(underway (list) st)
-              (loop st)]
-             [(failure! msg)
-              #;
-              (pretty-print (hash-remove st 'bytecode))
-              #;
-              (printf "FAIL: ~a\n" msg)
-              (void)]
-             [(returned code)
-              (match code
-                [0 (void)]
-                [1
-                 (displayln "RETURN 1")
-                 (pretty-print (hash-remove st 'bytecode))]
-                [code
-                 (printf "RETURN ~v\n" code)
-                 (pretty-print (hash-remove st 'bytecode))])])
-           ((step step-VM) st)))])]))
+        ])]))
 
 #;
 (= (hi (mulw (+ (+ (txn 4 AssetAmount) 1000) 1)

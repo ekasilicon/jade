@@ -2,9 +2,10 @@
 (require racket/match
          racket/set
          racket/port
-         "../record.rkt"
-         "../monad.rkt"
-         "../read-byte.rkt")
+         "record.rkt"
+         "monad.rkt"
+         "read-byte.rkt"
+         "instruction.rkt")
 
 (record failure (message))
 (record success (values state index))
@@ -62,38 +63,6 @@
 (define (push-destination n)
   (mupdate 'destinations (λ (ns) (cons n ns)) (list)))
 
-(define transaction-field
-  (>>= (read-uint8 rb) 
-       (lift
-        (match-lambda
-          [0  'Sender]
-          [1  'Fee]
-          [6  'Lease]
-          [7  'Receiver]
-          [8  'Amount]
-          [9  'CloseRemainderTo]
-          [16 'TypeEnum]
-          [17 'XferAsset]
-          [18 'AssetAmount]
-          [20 'AssetReceiver]
-          [21 'AssetCloseTo]
-          [22 'GroupIndex]
-          [24 'ApplicationID]
-          [25 'OnCompletion]
-          [26 'ApplicationArgs]
-          [27 'NumAppArgs]
-          [32 'RekeyTo]))))
-
-(define global-field
-  (>>= (read-uint8 rb) 
-       (lift
-        (match-lambda
-          [3  'ZeroAddress]
-          [4  'GroupSize]
-          [6  'Round]
-          [7  'LatestTimestamp]
-          [9  'CreatorAddress]))))
-
 (define destination
   (>>= (read-int16 rb) 
        (λ (offset)
@@ -103,101 +72,18 @@
                   (>> (push-destination dst)
                       (unit dst))))))))
 
-; Disassemble Instruction where instance Monad Disassemble
 (define disassemble-instruction
-  (>>= (read-opcode rb) 
+  (>>= (read-instruction rb)
        (match-lambda
-         [#x00 (unit `(err))]
-         [#x01 (unit `(sha256))]
-         [#x02 (unit `(keccak256))]
-         [#x03 (unit `(sha512_256))]
-         [#x04 (unit `(ed25519verify))]
-         [#x05 (>>= (read-uint8 rb) (λ (v) (unit `(ecdsa_verify ,v))))]
-         [#x06 (>>= (read-uint8 rb) (λ (v) (unit `(ecdsa_pk_decompress ,v))))]
-         [#x07 (>>= (read-uint8 rb) (λ (v) (unit `(ecdsa_pk_recover ,v))))]
-         [#x08 (unit `(+))]
-         [#x09 (unit `(-))]
-         [#x0a (unit `(/))]
-         [#x0b (unit `(*))]
-         [#x0c (unit `(<))]
-         [#x0d (unit `(>))]
-         [#x0e (unit `(<=))]
-         [#x0f (unit `(>=))]
-         [#x10 (unit `(&&))]
-         [#x11 (unit `(\|\|))]
-         [#x12 (unit `(==))]
-         [#x13 (unit `(!=))]
-         [#x14 (unit `(!))]
-         [#x15 (unit `(len))]
-         [#x16 (unit `(itob))]
-         [#x17 (unit `(btoi))]
-         [#x18 (unit `(%))]
-         [#x1a (unit `(&))]
-         [#x20 (>>= (read-intcblock rb) (λ (ns) (unit `(intcblock . ,ns))))]
-         [#x21 (>>= (read-uint8 rb) (λ (i) (unit `(intc ,i))))]
-         [#x22 (unit `(intc_0))]
-         [#x23 (unit `(intc_1))]
-         [#x24 (unit `(intc_2))]
-         [#x25 (unit `(intc_3))]
-         [#x26 (>>= (read-bytecblock rb) (λ (bss) (unit `(bytecblock . ,bss))))]
-         [#x27 (>>= (read-uint8 rb) (λ (i) (unit `(bytec ,i))))]
-         [#x28 (unit `(bytec_0))]
-         [#x29 (unit `(bytec_1))]
-         [#x2a (unit `(bytec_2))]
-         [#x2b (unit `(bytec_3))]
-         [#x31 (>>= transaction-field (λ (f) (unit `(txn ,f))))]
-         [#x32 (>>= global-field (λ (f) (unit `(global ,f))))]
-         [#x34 (>>= (read-uint8 rb) (λ (i) (unit `(load ,i))))]
-         [#x35 (>>= (read-uint8 rb) (λ (i) (unit `(store ,i))))]
-         [#x36
-          (>>= transaction-field 
-               (λ (f)
-                 (>>= (read-uint8 rb) 
-                      (λ (ai)
-                        (unit `(txna ,f ,ai))))))]
-         [#x38 (>>= transaction-field  (λ (f) (unit `(gtxns ,f))))]
-         [#x40 (>>= destination (λ (dst) (unit `(bnz ,dst))))]
-         [#x41 (>>= destination (λ (dst) (unit `(bz ,dst))))]
-         [#x42 (>>= destination (λ (dst) (unit `(b ,dst))))]
-         [#x43 (unit `(return))]
-         [#x44 (unit `(assert))]
-         ; #x45-#x47 unused
-         [#x48 (unit `(pop))]
-         [#x49 (unit `(dup))]
-         [#x4a (unit `(dup2))]
-         [#x4b (>>= (read-uint8 rb) (λ (n) (unit `(dig ,n))))]
-         [#x4c (unit `(swap))]
-         [#x4d (unit `(select))]
-         [#x4e (>>= (read-uint8 rb) (λ (n) (unit `(cover ,n))))]
-         [#x4f (>>= (read-uint8 rb) (λ (n) (unit `(uncover ,n))))]
-         [#x50 (unit `(concat))]
-         [#x51 (>>= (read-uint8 rb) (λ (s) (>>= (read-uint8 rb) (λ (e) (unit `(substring ,s ,e))))))]
-         [#x52 (unit `(substring3))]
-         [#x62 (unit `(app_local_get))]
-         [#x64 (unit `(app_global_get))]
-         [#x65 (unit `(app_global_get_ex))]
-         [#x66 (unit `(app_local_put))]
-         [#x67 (unit `(app_global_put))]
-         [#x68 (unit `(app_local_del))]
-         [#x69 (unit `(app_global_del))]
-         [#x80 (>>= (read-bytes rb) (λ (bs) (unit `(pushbytes ,bs))))]
-         [#x81 (>>= (read-varuint rb) (λ (n) (unit `(pushint ,n))))]
-         [#x88 (>>= destination (λ (dst) (unit `(callsub ,dst))))]
-         [#x89 (unit `(retsub))]
-         [#xaa (unit `(b%))]
-         [#xab (unit `(b\|))]
-         [#xac (unit `(b&))]
-         [#xad (unit `(b^))]
-         [#xae (unit `(b~))]
-         [#xaf (unit `(bzero))]
-         [#xb0 (unit `(log))]
-         [#xb1 (unit `(itxn_begin))]
-         [#xb2 (>>= transaction-field (λ (f) (unit `(itxn_field ,f))))]
-         [#xb3 (unit `(itxn_submit))]
-         [#xb4 (>>= transaction-field (λ (f) (unit `(itxn ,f))))]
-         [#xb5 (>>= transaction-field (λ (f) (>>= (read-uint8 rb)  (λ (i) (unit `(itxna ,f ,i))))))]
-         ; #xb6-#xbf unused
-         [#xc0 (>>= transaction-field (λ (f) (unit `(txnas ,f))))])))
+         [(list (and code (or 'b 'bz 'bnz 'callsub))
+                offset)
+          (>>= position
+               (λ (i)
+                 (let ([dst (+ i offset)])
+                   (>> (push-destination dst)
+                       (unit (list code dst))))))]
+         [instr
+          (unit instr)])))
 
 (define disassemble-instruction-stream
   (>>= position

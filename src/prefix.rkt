@@ -26,12 +26,9 @@
                            #f
                            (cons (bytes-ref bs 0) (subbytes bs 1))))]))
 
-(define read-prefix read-varuint)
-
 (provide prefix-Monad
-         prefix-ReadByte
-         read-prefix)
+         prefix-ReadByte)
 
 (module+ main
-  ((read-prefix prefix-ReadByte) (bytes 127 1 2 3))
-  ((read-prefix prefix-ReadByte) (bytes 128 127 1 2 3)))
+  ((read-varuint prefix-ReadByte) (bytes 127 1 2 3))
+  ((read-varuint prefix-ReadByte) (bytes 128 127 1 2 3)))
