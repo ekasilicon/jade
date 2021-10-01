@@ -202,8 +202,8 @@
      (>> swap
          (stack-apply vm< 2))]
     [`(<=)
-     (>> (>> swap
-             (stack-apply vm< 2))
+     (>> swap
+         (stack-apply vm< 2)
          (stack-apply vm! 1))]
     [`(>=)
      (>> (stack-apply vm< 2)
@@ -327,9 +327,9 @@
                 (>>= pop
                      (λ (a)
                        (>> (push a)
-                           (>> (push b)
-                               (>> (push a)
-                                   (push b)))))))))]
+                           (push b)
+                           (push a)
+                           (push b)))))))]
     [`(dig ,n)
      (>> (lsv>= 3 "dig")
          (>>= (let loop ([n n])
@@ -371,50 +371,50 @@
          (stack-apply getbyte 2))]
     [`(balance)
      (>> (lsv>= 2 "balance")
-         (>> (in-mode 'Application "balance")
-             (stack-apply balance 1)))]
+         (in-mode 'Application "balance")
+         (stack-apply balance 1))]
     [`(app_local_get)
      (>> (lsv>= 2 "app_local_get")
-         (>> (in-mode 'Application "app_local_get")
-             (stack-apply app-local-get 2)))]
+         (in-mode 'Application "app_local_get")
+         (stack-apply app-local-get 2))]
     [`(app_local_get_ex)
      (>> (lsv>= 2 "app_local_get_ex")
-         (>> (in-mode 'Application "app_local_get_ex")
-             (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-get-ex a b c)))))))))]
+         (in-mode 'Application "app_local_get_ex")
+         (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-get-ex a b c))))))))]
     [`(app_global_get)
      (>> (lsv>= 2 "app_global_get")
-         (>> (in-mode 'Application "app_global_get")
-             (stack-apply app-global-get 1)))]
+         (in-mode 'Application "app_global_get")
+         (stack-apply app-global-get 1))]
     [`(app_global_get_ex)
      (>> (lsv>= 2 "app_global_get_ex")
-         (>> (in-mode 'Application "app_global_get_ex")
-             (>>= pop (λ (b) (>>= pop (λ (a) (app-global-get-ex a b)))))))]
+         (in-mode 'Application "app_global_get_ex")
+         (>>= pop (λ (b) (>>= pop (λ (a) (app-global-get-ex a b))))))]
     [`(app_local_put)
      (>> (lsv>= 2 "app_local_put")
-         (>> (in-mode 'Application "app_local_put")
-             (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c)))))))))]
+         (in-mode 'Application "app_local_put")
+         (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c))))))))]
     [`(app_global_put)
      (>> (lsv>= 2 "app_global_put")
-         (>> (in-mode 'Application "app_global_put")
-             (>>= pop (λ (b) (>>= pop (λ (a) (app-global-put a b)))))))]
+         (in-mode 'Application "app_global_put")
+         (>>= pop (λ (b) (>>= pop (λ (a) (app-global-put a b))))))]
     [`(app_local_del)
      (>> (lsv>= 2 "app_local_del")
-         (>> (in-mode 'Application "app_local_del")
-             (>>= pop (λ (b) (>>= pop (λ (a) (app-local-del a b)))))))]
+         (in-mode 'Application "app_local_del")
+         (>>= pop (λ (b) (>>= pop (λ (a) (app-local-del a b))))))]
     [`(asset_holding_get)
      (>> (lsv>= 2 "asset_holding_get")
-         (>> (in-mode 'Application "asset_holding_get")
-             (>>= (read-uint8 rb)
-                  (λ (fi) (>>= pop (λ (b) (>>= pop (λ (a) (asset-holding-get a b fi)))))))))]
+         (in-mode 'Application "asset_holding_get")
+         (>>= (read-uint8 rb)
+              (λ (fi) (>>= pop (λ (b) (>>= pop (λ (a) (asset-holding-get a b fi))))))))]
     [`(asset_params_get)
      (>> (lsv>= 2 "asset_params_get")
-         (>> (in-mode 'Application "asset_params_get")
-             (>>= (read-uint8 rb)
-                  (λ (fi) (>>= pop (λ (a) (asset-params-get a fi)))))))]
+         (in-mode 'Application "asset_params_get")
+         (>>= (read-uint8 rb)
+              (λ (fi) (>>= pop (λ (a) (asset-params-get a fi))))))]
     [`(min_balance)
      (>> (lsv>= 3 "min_balance")
-         (>> (in-mode 'Application "min_balance")
-             (stack-apply min-balance 1)))]
+         (in-mode 'Application "min_balance")
+         (stack-apply min-balance 1))]
     [`(pushbytes ,bs)
      (>> (lsv>= 3 "pushbytes")
          (push bs))]
