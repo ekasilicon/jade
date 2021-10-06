@@ -2,23 +2,31 @@
 (require racket/match
          racket/string
          racket/pretty
-         "sumtype.rkt")
+         "record.rkt"
+         "sumtype.rkt"
+         (prefix-in i: "instruction.rkt"))
 
-(define-sumtype Result
-  (success values index)
-  (failure message))
+; there are two notions of failure, "uncommitted" and "committed"
+; a committed failure occurs when the parse definitely couldn't
+; recover, usually because the line prefix does not reach a
+; commit point for any other rule.
+; a committed failure allows the problem area to be reported with
+; greater precision.
+; unfortunately, commit points are inserted manually at this point.
 
-(define ((unit . xs) input i) (success [values xs] [index i]))
-(define (fail input i) #f)
+(record success (values index))
+(record failure (message))
 
-(define ((>>= m f) input i)
-  (match (m input i)
+(define ((unit . xs) input i sk fk) (sk xs i fk))
+(define (fail input i sk fk) (fk))
+
+(define ((>>= m f) input i sk fk)
+  (m input i (λ (xs i fk) ((apply f xs) input i sk fk)) fk)
+  #;
+  (match (m input i fk)
     [(success [values xs] [index i])
      ((apply f xs) input i)]
-    [(failure message)
-     (failure message)]
-    [#f
-     #f]))
+    [r r]))
 
 (define (>> m . ms)
   (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))
@@ -26,21 +34,13 @@
 (define ((lift f) . xs)
   (call-with-values (λ () (apply f xs)) unit))
 
-(define ((∨ . ps) input i) 
+(define ((∨ . ps) input i sk fk) 
   (let loop ([ps ps])
     (match ps
       [(list)
-       (fail input i)]
+       (fk)]
       [(cons p ps)
-       (match (p input i)
-         [(success [values xs] [index i])
-          (success [values xs] [index i])]
-         [(failure [message msg])
-          (failure [message msg])
-          #;
-          (error 'parse "alternate returns a failure with message ~s" msg)]
-         [#f
-          (loop ps)])])))
+       (p input i sk (λ () (loop ps)))])))
 
 (define (∘ . ps)
   (let loop ([ps ps])
@@ -50,9 +50,18 @@
       [(cons p ps)
        (>>= p (λ (x) (>>= (loop ps) (λ xs (apply unit x xs)))))])))
 
-(define ((p* p) input i) 
+(define ((p* p) input i sk fk) 
   (let loop ([i i]
-             [xs (list)])
+             [xs (list)]
+             [fk fk])
+    (p input i (λ (x i fk)
+                 (match x
+                   [(list x)
+                    (loop i (cons x xs) fk)]
+                   [_
+                    (error 'p* "expected a single result")]) )
+       (λ () (sk (list (reverse xs)) i fk)))
+    #;
     (match (p input i)
       [(success [values (list x)] [index i])
        (loop i (cons x xs))]
@@ -64,7 +73,10 @@
 (define (p+ p)
   (>>= p (λ (x) (>>= (p* p) (λ (xs) (unit (cons x xs)))))))
 
-(define (p? p) (∨ p (unit #f)))
+(define ((p? p) input i sk fk)
+  (p input i sk (λ () (sk (list #f) i fk)))
+  #;
+  (∨ p (unit #f)))
 
 (define (cc ?)
   (>>= read-char
@@ -81,15 +93,15 @@
   (let ([cs (string->list s)])
     (λ (c) (memv c cs))))
 
-(define (end-of-input input i)
+(define (end-of-input input i sk fk)
   (if (= (string-length input) i)
-    ((unit #f) input i) 
-    (fail input i)))
+    (sk (list #f) i fk)
+    (fk)))
 
-(define (read-char input i)
+(define (read-char input i sk fk)
   (if (= (string-length input) i)
-    #f
-    (success [values (list (string-ref input i))] [index (add1 i)])))
+    (fk)
+    (sk (list (string-ref input i)) (add1 i) fk)))
 
 (define (literal s)
   (let loop ([cs (string->list s)])
@@ -109,10 +121,15 @@
 (define space* (p* (cc (λ (c) (eqv? c #\space)))))
 (define space+ (p+ (cc (λ (c) (eqv? c #\space)))))
 
+(define whitespace* (p* (cc (λ (c) (or (eqv? c #\space) (eqv? c #\tab))))))
+(define whitespace+ (p+ (cc (λ (c) (or (eqv? c #\space) (eqv? c #\tab))))))
+
 (define (snippet input i)
   (substring input i (min (string-length input) (+ i 64))))
 
-(define ((report p template) input i)
+(define ((report p template) input i sk fk)
+  (p input i sk (λ () (error template (snippet input i))))
+  #;
   (match (p input i)
     [(success [values xs] [index i])
      (success [values xs] [index i])]
@@ -121,12 +138,19 @@
     [#f
      (failure [message (format template (snippet input i))])]))
 
-(define ((trace which p) input i)
+(define ((trace which p) input i sk fk)
   (displayln 'TRACE)
   (displayln which)
   (println p)
   (println i)
   (println (snippet input i))
+  (p input i (λ (x i fk)
+               (println x)
+               (sk x i fk))
+     (λ ()
+       (displayln "FAILED")
+       (fk)))
+  #;
   (cond
     [(p input i)
      => (λ (r)
@@ -136,7 +160,7 @@
      (displayln "FAILED")
      #f]))
 
-(define ((not-implemented id) input i)
+(define ((not-implemented id) input i sk fk)
   (error 'parse "not implemented at ~a and ~s" id (snippet input i)))
 
 ; numbers
@@ -196,7 +220,7 @@
 
 (define pbytes
   (∨ (>> (literal "base64")
-         space+
+         whitespace+
          (>>= (p* (cc (^ "\r\n")))
               (lift (λ (cs) (apply string cs)))))
      (>> (literal "0x")
@@ -230,7 +254,7 @@ byte[+ ](string)
                   [(list)
                    (unit (list))]
                   [(cons arg args)
-                   (>> space+
+                   (>> whitespace+
                        (>>= arg
                             (λ (x)
                               (>>= (loop args)
@@ -310,7 +334,23 @@ EOF
      (make-instruction "b^")
      (make-instruction "b~")))
 
+(require (for-syntax racket/base
+                     racket/match
+                     syntax/parse))
+
+(define-syntax enumtype-parser
+  (syntax-parser
+    [(_ typename:id)
+     (match (syntax-local-value #'typename (λ () #f))
+       [(sumtype-info variants)
+        (with-syntax ([(varname ...) (map symbol->string (map syntax->datum variants))]
+                      [(variant ...) variants])
+          #'(∨ (>> (literal varname) (unit (variant))) ...) )]
+       [_ (raise-syntax-error #f "not a sumtype" #'typename)])]))
+
 (define transaction-field
+  (enumtype-parser i:TransactionField)
+  #;
   (apply ∨ (map make-symbol (string-split
                              #<<EOF
 Sender
@@ -399,7 +439,7 @@ EOF
 
 (define value-loading-instruction
   (∨ (>> (literal "intcblock")
-         (>>= (p* (>> space+ varuint))
+         (>>= (p* (>> whitespace+ varuint))
               (λ (varuints) `(intcblock . ,varuints))))
      (make-instruction "intc" varuint)
      (make-instruction "intc_0")
@@ -409,7 +449,7 @@ EOF
      (make-instruction "int" varuint) ; pseudo instruction
      (make-instruction "pushint" varuint)
      (>> (literal "bytecblock")
-         (>>= (p* (>> space+ pbytes))
+         (>>= (p* (>> whitespace+ pbytes))
               (λ (bytess) `(bytecblock . ,bytess))))
      (make-instruction "bytec" varuint)
      (make-instruction "bytec_0")
@@ -473,7 +513,7 @@ EOF
   (∨ (make-symbol "AssetBalance")
      (make-symbol "AssetFrozen")))
 
-(define asset-param-field
+(define asset-params-field
   (∨ (make-symbol "AssetTotal")
      (make-symbol "AssetDecimals")
      (make-symbol "AssetDefaultFrozen")
@@ -504,21 +544,20 @@ EOF
      (make-instruction "app_opted_in")
      (make-instruction "app_local_get_ex")
      (make-instruction "app_local_get")
-     (trace 'app-global (make-instruction "app_global_get_ex"))
+     (make-instruction "app_global_get_ex")
      (make-instruction "app_global_get")
      (make-instruction "app_local_put")
      (make-instruction "app_global_put")
      (make-instruction "app_local_del")
      (make-instruction "app_global_del")
      (make-instruction "asset_holding_get" asset-holding-field)
-     (make-instruction "asset_params_get" asset-param-field)
+     (make-instruction "asset_params_get" asset-params-field)
      (make-instruction "app_params_get" app-field)
      (make-instruction "log")))
 
 
 (define instruction
-  (>> (∨ (literal "\t")
-         space*)
+  (>> whitespace*
       (∨ arithmetic-logic-cryptographic-instruction
          byte-array-extract-instruction
          byte-array-arithmetic-instruction
@@ -558,6 +597,7 @@ EOF
       (∨ newline end-of-input)
       (unit v)))
 
+#;
 (define line
   ; we must distinguish between a comment on a blank line
   ; and a comment following context because the division instruction
@@ -569,13 +609,41 @@ EOF
                   "expected pragma, label, or instruction at ~s")
           maybe-comment-after)))
 
+#|
+
+  // this is a comment
+
+try getting a directive
+the pragma fails because we don't encounter #pragma
+we succeed with the instruction consuming "  /", we have left "/ this is a comment"
+but the failure continuation given to the success continuation will retry the line
+
+|#
+
+(define line
+  (>>= (p? (∨ pragma
+              instruction
+              label-declaration))
+       (λ (v)
+         (>> whitespace*
+             (p? comment)
+             (∨ newline end-of-input)
+             (unit v)))))
+
 (define (parse input)
   (let loop ([i 0])
+    (end-of-input input i (λ (_ i fk) (list))
+                  (λ ()
+                    (line input i (λ (directive i fk)
+                                    (cons directive (loop i)))
+                          (λ ()
+                            (error 'parse "uncaught error with ~s" (snippet input i))))))
+    #;
     (cond
       [(end-of-input input i)
        =>
        (match-lambda
-         [(success [values (list _)] [index i])
+         [(success [values (list #f)] [index i])
           (list)]
          [(failure [message msg])
           (error 'parse msg)])]
@@ -583,6 +651,7 @@ EOF
        =>
        (match-lambda
          [(success [values (list directive)] [index i])
+          (println directive)
           (if directive
             (cons directive (loop i))
             (loop i))]
@@ -644,4 +713,3 @@ EOF
                   (void)])
                (loop next-ph)]))
           (pretty-print (make-reader-graph initial-ph)))))))
-
