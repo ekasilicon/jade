@@ -1,17 +1,22 @@
 #lang racket/base
 (require racket/match
          racket/string
-         racket/pretty)
+         racket/pretty
+         "sumtype.rkt")
 
-(define ((unit . xs) input i) `(success ,xs ,i))
+(define-sumtype Result
+  (success values index)
+  (failure message))
+
+(define ((unit . xs) input i) (success [values xs] [index i]))
 (define (fail input i) #f)
 
 (define ((>>= m f) input i)
   (match (m input i)
-    [`(success ,xs ,i)
+    [(success [values xs] [index i])
      ((apply f xs) input i)]
-    [`(failure ,msg)
-     `(failure ,msg)]
+    [(failure message)
+     (failure message)]
     [#f
      #f]))
 
@@ -28,10 +33,10 @@
        (fail input i)]
       [(cons p ps)
        (match (p input i)
-         [`(success ,xs ,i)
-          `(success ,xs ,i)]
-         [`(failure ,msg)
-          `(failure ,msg)
+         [(success [values xs] [index i])
+          (success [values xs] [index i])]
+         [(failure [message msg])
+          (failure [message msg])
           #;
           (error 'parse "alternate returns a failure with message ~s" msg)]
          [#f
@@ -49,12 +54,12 @@
   (let loop ([i i]
              [xs (list)])
     (match (p input i)
-      [`(success ,(list x) ,i)
+      [(success [values (list x)] [index i])
        (loop i (cons x xs))]
-      [`(failure ,msg)
+      [(failure [message msg])
        (error 'parse "repetition has a failure of its own with message ~s" msg)]
       [#f
-       `(success ,(list (reverse xs)) ,i)])))
+       (success [values (list (reverse xs))] [index i])])))
 
 (define (p+ p)
   (>>= p (λ (x) (>>= (p* p) (λ (xs) (unit (cons x xs)))))))
@@ -84,7 +89,7 @@
 (define (read-char input i)
   (if (= (string-length input) i)
     #f
-    `(success ,(list (string-ref input i)) ,(add1 i))))
+    (success [values (list (string-ref input i))] [index (add1 i)])))
 
 (define (literal s)
   (let loop ([cs (string->list s)])
@@ -109,12 +114,12 @@
 
 (define ((report p template) input i)
   (match (p input i)
-    [`(success ,xs ,i)
-     `(success ,xs ,i)]
-    [`(failure ,msg)
-     `(failure ,msg)]
+    [(success [values xs] [index i])
+     (success [values xs] [index i])]
+    [(failure [message msg])
+     (failure [message msg])]
     [#f
-     `(failure ,(format template (snippet input i)))]))
+     (failure [message (format template (snippet input i))])]))
 
 (define ((trace which p) input i)
   (displayln 'TRACE)
@@ -122,10 +127,14 @@
   (println p)
   (println i)
   (println (snippet input i))
-  (match (p input i)
-    [`(success ,xs ,i)
-     (println `(success ,xs ,i))
-     `(success ,xs ,i)]))
+  (cond
+    [(p input i)
+     => (λ (r)
+          (println r)
+          r)]
+    [else
+     (displayln "FAILED")
+     #f]))
 
 (define ((not-implemented id) input i)
   (error 'parse "not implemented at ~a and ~s" id (snippet input i)))
@@ -416,7 +425,7 @@ EOF
      (make-instruction "arg_2")
      (make-instruction "arg_3")
      (make-instruction "txn" transaction-field)
-     (make-instruction "gtxn" transaction-field)
+     (make-instruction "gtxn" uint8 transaction-field)
      (make-instruction "txna" transaction-field uint8)
      (make-instruction "gtxna" uint8 transaction-field uint8)
      (make-instruction "gtxnas" uint8 transaction-field)
@@ -493,10 +502,10 @@ EOF
   (∨ (make-instruction "balance")
      (make-instruction "min_balance")
      (make-instruction "app_opted_in")
-     (make-instruction "app_local_get")
      (make-instruction "app_local_get_ex")
+     (make-instruction "app_local_get")
+     (trace 'app-global (make-instruction "app_global_get_ex"))
      (make-instruction "app_global_get")
-     (make-instruction "app_global_get_ex")
      (make-instruction "app_local_put")
      (make-instruction "app_global_put")
      (make-instruction "app_local_del")
@@ -566,18 +575,18 @@ EOF
       [(end-of-input input i)
        =>
        (match-lambda
-         [`(success (,_) ,i)
+         [(success [values (list _)] [index i])
           (list)]
-         [`(failure ,msg)
+         [(failure [message msg])
           (error 'parse msg)])]
       [(line input i)
        =>
        (match-lambda
-         [`(success (,directive) ,i)
+         [(success [values (list directive)] [index i])
           (if directive
             (cons directive (loop i))
             (loop i))]
-         [`(failure ,msg)
+         [(failure [message msg])
           (error 'parse msg)])]
       [else
        (error 'parse "uncaught error with ~s" (snippet input i))])))

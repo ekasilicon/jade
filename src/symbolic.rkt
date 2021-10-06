@@ -418,16 +418,16 @@
              [(and (exact-nonnegative-integer? a)
                    (exact-nonnegative-integer? b))
               (let ([c (* a b)])
-                (>> (push (arithmetic-shift c -64))
-                    (push (bitwise-and c (sub1 (expt 2 64))))))]
+                (unit (arithmetic-shift c -64)
+                      (bitwise-and c (sub1 (expt 2 64)))))]
              [else
-              (>> (push `(hi (mulw ,a ,b)))
-                  (push `(lo (mulw ,a ,b))))]))]
+              (unit `(hi (mulw ,a ,b))
+                    `(lo (mulw ,a ,b)))]))]
         ; XXX handle literals
         [addw
          (λ (a b)
-           (>> (push `(hi (addw ,a ,b)))
-               (push `(lo (addw ,a ,b)))))]
+           (unit `(hi (addw ,a ,b))
+                 `(lo (addw ,a ,b))))]
         [divmodw
          (λ (a b c d)
            (let ([dend (match* (a b)
@@ -441,10 +441,10 @@
                          [(`(hi ,x) `(lo ,x)) x]
                          [(x y) `(uint128 ,x ,y)])])
              (sif isor
-                  (>> (push `(hi (quotient ,dend ,isor)))
-                      (>> (push `(lo (quotient ,dend ,isor)))
-                          (>> (push `(hi (remainder ,dend ,isor)))
-                              (push `(lo (remainder ,dend ,isor))))))
+                  (unit `(hi (quotient ,dend ,isor))
+                        `(lo (quotient ,dend ,isor))
+                        `(hi (remainder ,dend ,isor))
+                        `(lo (remainder ,dend ,isor)))
                   (panic "divmodw by 0"))))]
         [is-zero (λ (c) (sif c (unit #f) (unit #t)))]
         [&& (λ (x y) (unit `(∧ ,x ,y)))]
@@ -544,8 +544,8 @@
            (update app-local (λ (al) (cons `(del ,acct ,key) al))))]
         [app-local-get-ex
          (λ (acct app-id key)
-           (>> (push `(app-local ,acct ,app-id ,key))
-               (push `(app-local-exists ,acct ,app-id ,key))))]
+           (unit `(app-local ,acct ,app-id ,key)
+                 `(app-local-exists ,acct ,app-id ,key)))]
         [app-global-get
          (λ (key)
            (>>= (get app-global)
@@ -563,34 +563,20 @@
            (update app-global (λ (ag) (cons `(put ,key ,val) ag))))]
         [app-global-get-ex
          (λ (app-id key)
-           (>> (push `(app-global ,app-id ,key))
-               (push `(app-global-exists ,app-id ,key))))]
+           (unit `(app-global ,app-id ,key)
+                 `(app-global-exists ,app-id ,key)))]
         [asset-holding-get
          (λ (acct asset x)
-           (>>= (match x
-                  [0 (unit 'AssetBalance)]
-                  [1 (unit 'AssetFrozen)])
+           (>>= (read-asset-holding-field rb)
                 (λ (f)
-                  (>> (push `(asset-holding ,acct ,asset ,f))
-                      (push `(asset-holding-exists ,acct ,asset ,f))))))]
+                  (unit `(asset-holding ,acct ,asset ,f)
+                        `(asset-holding-exists ,acct ,asset ,f)))))]
         [asset-params-get
          (λ (asset x)
-           (>>= (match x
-                  [0  (unit 'AssetTotal)]
-                  [1  (unit 'AssetDecimals)]
-                  [2  (unit 'AssetDefaultFrozen)]
-                  [3  (unit 'AssetUnitName)]
-                  [4  (unit 'AssetName)]
-                  [5  (unit 'AssetURL)]
-                  [6  (unit 'AssetMetadataHash)]
-                  [7  (unit 'AssetManager)]
-                  [8  (unit 'AssetReserve)]
-                  [9  (unit 'AssetFreeze)]
-                  [10 (unit 'AssetClawback)]
-                  [11 (unit 'AssetCreator)])
+           (>>= (read-asset-params-field rb)
                 (λ (f)
-                  (>> (push `(asset-params ,asset ,f))
-                      (push `(asset-params-exists ,asset ,f))))))]
+                  (unit `(asset-params ,asset ,f)
+                        `(asset-params-exists ,asset ,f)))))]
         [bzero (λ (x) (unit `(bzero ,x)))]
         [check-final
          (>>= (get bytecode)

@@ -180,6 +180,61 @@
          read-global-field
          global-field-logic-signature-version)
 
+(define-sumtype AssetHoldingField
+  (AssetBalance)
+  (AssetFrozen))
+
+(define asset-holding-field
+  (index→enumtype AssetHoldingField))
+
+(define asset-holding-field-name
+  (sumtype-name AssetHoldingField))
+
+(define (read-asset-holding-field rb)
+  (match-define (ReadByte [monad (Monad unit >>=)]) rb)
+  (>>= (read-uint8 rb) (λ (i) (unit (asset-holding-field i)))))
+
+(provide (sumtype-out AssetHoldingField)
+         asset-holding-field-name
+         read-asset-holding-field)
+
+(define-sumtype AssetParamsField
+  (AssetTotal)
+  (AssetDecimals)
+  (AssetDefaultFrozen)
+  (AssetUnitName)
+  (AssetName)
+  (AssetURL)
+  (AssetMetadataHash)
+  (AssetManager)
+  (AssetReserve)
+  (AssetFreeze)
+  (AssetClawback)
+  (AssetCreator))
+
+(define asset-params-field
+  (index→enumtype AssetParamsField))
+
+(define asset-params-field-name
+  (sumtype-name AssetParamsField))
+
+(define (read-asset-params-field rb)
+  (match-define (ReadByte [monad (Monad unit >>=)]) rb)
+  (>>= (read-uint8 rb) (λ (i) (unit (asset-params-field i)))))
+
+(define asset-params-field-logic-signature-version
+  (enumtype-case-lambda AssetParamsField
+    [(AssetTotal AssetDecimals AssetDefaultFrozen AssetUnitName AssetName AssetURL
+      AssetMetadataHash AssetManager AssetReserve AssetFreeze AssetClawback)
+     1]
+    [(AssetCreator)
+     5]))
+
+(provide (sumtype-out AssetParamsField)
+         asset-params-field-name
+         read-asset-params-field
+         asset-params-field-logic-signature-version)
+
 (define-sumtype Instruction
   (err)
   (sha256)
