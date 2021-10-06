@@ -20,7 +20,7 @@
                    [#f #f])))]))
 
 (define prefix-ReadByte
-  (ReadByte [Monad prefix-Monad]
+  (ReadByte [monad prefix-Monad]
             [read-byte (λ (bs)
                          (if (zero? (bytes-length bs))
                            #f

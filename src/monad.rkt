@@ -3,7 +3,7 @@
 
 (record Monad (unit >>= >>))
 
-(record MonadPlus (Monad mzero mplus))
+(record Monad+ (monad mzero mplus))
 
 (provide Monad
-         MonadPlus)
+         Monad+)

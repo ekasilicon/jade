@@ -1,12 +1,13 @@
 #lang racket/base
-(require racket/match
+(require (except-in racket/match ==)
          "record.rkt"
+         "sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
-         "instruction.rkt")
+         (prefix-in i: "instruction.rkt"))
 
-(record VM (MonadPlus
-            ReadByte
+(record VM (monad+
+            read-byte
             panic
             return!
             logic-sig-version
@@ -18,11 +19,18 @@
             put-intcblock
             get-bytecblock
             put-bytecblock
+            arg
             push
             pop
             push-call
             pop-call
             sha256
+            keccak256
+            sha512-256
+            ed25519verify
+            ecdsa-verify
+            ecdsa-pk-decompress
+            ecdsa-pk-recover
             +
             -
             /
@@ -31,6 +39,10 @@
             itob
             btoi
             %
+            &
+            \|
+            ^
+            ~
             mulw
             addw
             divmodw
@@ -49,26 +61,61 @@
             group-transaction
             transaction-array
             group-transaction-array
+            group-aid
+            group-load
             load
             store
+            getbit
+            setbit
+            setbyte
+            extract
+            extract-uint
             balance
             min-balance
+            app-opted-in
             app-local-get
             app-local-put
             app-local-del
             app-local-get-ex
             app-global-get
             app-global-put
+            app-global-del
             app-global-get-ex
             asset-holding-get
             asset-params-get
+            app-params-get
+            shl
+            shr
+            bitlen
+            expw
+            b+
+            b-
+            b/
+            b*
+            b<
+            b>
+            b<=
+            b>=
+            b==
+            b!=
+            b%
+            b\|
+            b&
+            b^
+            b~
             bzero
+            internal-transaction-begin
+            internal-transaction-field
+            internal-transaction-submit
+            internal-transaction
+            internal-transaction-array
+            args
             check-final))
 
-; execute : VM m s => Instruction → m ()
+; execute : vm m s => Instruction → m ()
 (define (execute vm)
-  (match-define (VM [MonadPlus (MonadPlus [Monad (Monad unit >>= >>)])]
-                    [ReadByte rb]
+  (match-define (VM [monad+ (Monad+ [monad (Monad unit >>= >>)])]
+                    [read-byte rb]
                     panic
                     return!
                     logic-sig-version
@@ -80,11 +127,18 @@
                     put-intcblock
                     get-bytecblock
                     put-bytecblock
-                    push
-                    pop
+                    arg
+                    [push vm:push]
+                    [pop vm:pop]
                     push-call
                     pop-call
                     sha256
+                    keccak256
+                    sha512-256
+                    ed25519verify
+                    ecdsa-verify
+                    ecdsa-pk-decompress
+                    ecdsa-pk-recover
                     [+ vm+]
                     [- vm-]
                     [/ vm/]
@@ -92,7 +146,11 @@
                     len
                     itob
                     btoi
-                    %
+                    [% vm%]
+                    [& vm&]
+                    [\| vm\|]                    
+                    [^ vm^] 
+                    [~ vm~]
                     mulw
                     addw
                     divmodw
@@ -111,20 +169,56 @@
                     group-transaction
                     transaction-array
                     group-transaction-array
+                    group-aid
+                    group-load
                     load
                     store
+                    getbit
+                    setbit
+                    ;getbyte
+                    setbyte
+                    extract
+                    extract-uint
                     balance
                     min-balance
+                    app-opted-in
                     app-local-get
                     app-local-put
                     app-local-del
                     app-local-get-ex
                     app-global-get
                     app-global-put
+                    app-global-del
                     app-global-get-ex
                     asset-holding-get
                     asset-params-get
-                    bzero)
+                    app-params-get
+                    shl
+                    shr
+                    bitlen
+                    expw
+                    b+
+                    b-
+                    b/
+                    b*
+                    b<
+                    b>
+                    b<=
+                    b>=
+                    b==
+                    b!=
+                    b%
+                    b\|
+                    b&
+                    b^
+                    b~
+                    bzero
+                    internal-transaction-begin
+                    internal-transaction-field
+                    internal-transaction-submit
+                    internal-transaction
+                    internal-transaction-array
+                    args)
     vm)
   (define lsv>= (logic-sig-version>= vm))
   (define (lookup-intcblock i)
@@ -160,296 +254,439 @@
                                (< lsv 2))
                         (panic "cannot go to end of bytecode (length ~a) in version ~a < 2" (bytes-length bc) lsv)
                         (set-pc pc)))))))))
-  (define (stack-apply f arity)
-    (>>= (>>= (let loop ([n arity]
-                         [xs (list)])
+  (define (pop [n 1])
+    (let loop ([n n]
+               [xs (list)])
+      (if (zero? n)
+        (apply unit xs)
+        (>>= pop (λ (x) (loop (sub1 n) (cons x xs)))))))
+  (define (push . xs) (foldr (λ (x m) (>> (push x) m)) (unit) xs))
+  (define swap (>>= (pop 2) (λ (a b) (push b a))))
+  (define (primitive-apply f stack-arity . xs)
+    (>>= (>>= (pop stack-arity) (λ ys (apply f (append xs ys)))) push))
+  (define-syntax-rule (machine-fail instr)
+    (error 'vm "unimplemented instruction ~a" 'instr))
+  (λ (instr)
+    (sumtype-case i:Instruction instr
+      [(i:err)
+       (panic "err")]
+      [(i:sha256)
+       (primitive-apply sha256 1)]
+      [(i:keccak256)
+       (primitive-apply keccak256 1)]
+      [(i:sha512_256)
+       (primitive-apply sha512-256 1)]
+      [(i:ed25519verify)
+       (primitive-apply ed25519verify 3)]
+      [(i:ecdsa_verify v)
+       (primitive-apply ecdsa-verify 5 v)]
+      [(i:ecdsa_pk_decompress v)
+       (primitive-apply ecdsa-pk-decompress 1 v)]
+      [(i:ecdsa_pk_recover v)
+       (primitive-apply ecdsa-pk-recover 4 v)]
+      [(i:+)
+       (primitive-apply vm+ 2)]
+      [(i:-)
+       (primitive-apply vm- 2)]
+      [(i:/)
+       (>>= (pop 2)
+            (λ (a b)
+              (>>= (is-zero b)
+                   (λ (zero?)
+                     (if zero?
+                       (panic "/ by 0")
+                       (>>= (vm/ a b) push))))))]
+      [(i:*)
+       (primitive-apply vm* 2)]
+      [(i:<)
+       (primitive-apply vm< 2)]
+      [(i:>)
+       (>> swap
+           (primitive-apply vm< 2))]
+      [(i:<=)
+       (>> swap
+           (primitive-apply vm< 2)
+           (primitive-apply vm! 1))]
+      [(i:>=)
+       (>> (primitive-apply vm< 2)
+           (primitive-apply vm! 1))]
+      [(i:&&)
+       (primitive-apply && 2)]
+      [(i:\|\|)
+       (primitive-apply \|\| 2)]
+      [(i:==)
+       (primitive-apply vm= 2)]
+      [(i:!=)
+       (>> (primitive-apply vm= 2)
+           (primitive-apply vm! 1))]
+      [(i:!)
+       (primitive-apply vm! 1)]
+      [(i:len)
+       (primitive-apply len 1)]
+      [(i:itob)
+       (primitive-apply itob 1)]
+      [(i:btoi)
+       (primitive-apply btoi 1)]
+      [(i:%)
+       (>>= (pop 2)
+            (λ (a b)
+              (>>= (is-zero b)
+                   (λ (zero?)
+                     (if zero?
+                       (panic "% by 0")
+                       (>>= (vm% a b) push))))))]
+      [(i:\|)
+       (primitive-apply vm\| 2)]
+      [(i:&)
+       (primitive-apply vm& 2)]
+      [(i:^)
+       (primitive-apply vm^ 2)]
+      [(i:~)
+       (primitive-apply vm~ 1)]
+      [(i:mulw)
+       (primitive-apply mulw 2)]
+      [(i:addw)
+       (primitive-apply addw 2)]
+      [(i:divmodw)
+       (primitive-apply divmodw 4)]
+      [(i:intcblock [uints ns])
+       (put-intcblock ns)]
+      [(i:intc i)
+       (>>= (lookup-intcblock i) push)]
+      [(i:intc_0)
+       (>>= (lookup-intcblock 0) push)]
+      [(i:intc_1)
+       (>>= (lookup-intcblock 1) push)]
+      [(i:intc_2)
+       (>>= (lookup-intcblock 2) push)]
+      [(i:intc_3)
+       (>>= (lookup-intcblock 3) push)]
+      [(i:bytecblock [bytess bss])
+       (put-bytecblock bss)]
+      [(i:bytec i)
+       (>>= (lookup-bytecblock i) push)]
+      [(i:bytec_0)
+       (>>= (lookup-bytecblock 0) push)]
+      [(i:bytec_1)
+       (>>= (lookup-bytecblock 1) push)]
+      [(i:bytec_2)
+       (>>= (lookup-bytecblock 2) push)]
+      [(i:bytec_3)
+       (>>= (lookup-bytecblock 3) push)]
+      [(i:arg n)
+       (>> (in-mode 'Signature "arg")
+           (primitive-apply arg 0 n))]
+      [(i:arg_0)
+       (>> (in-mode 'Signature "arg_0")
+           (primitive-apply arg 0 0))]
+      [(i:arg_1)
+       (>> (in-mode 'Signature "arg_1")
+           (primitive-apply arg 0 1))]
+      [(i:arg_2)
+       (>> (in-mode 'Signature "arg_2")
+           (primitive-apply arg 0 2))]
+      [(i:arg_3)
+       (>> (in-mode 'Signature "arg_3")
+           (primitive-apply arg 0 3))]
+      [(i:txn [field f])
+       (primitive-apply transaction 0 f)]
+      [(i:global [field f])
+       (primitive-apply global 0 f)]
+      [(i:gtxn [group-index gi] [field f])
+       (primitive-apply group-transaction 0 gi f)]
+      [(i:load i)
+       (primitive-apply load 0 i)]
+      [(i:store i)
+       (primitive-apply store 1 i)]
+      [(i:txna [field f] [array-index ai])
+       (primitive-apply transaction-array 0 f ai)]
+      [(i:gtxna [group-index gi] [field f] [array-index ai])
+       (primitive-apply group-transaction-array 0 gi f ai)]
+      [(i:gtxns [field f])
+       (>>= (>>= (pop) (λ (gi) (group-transaction gi f))) push)]
+      [(i:gtxnsa [field f] [array-index ai])
+       (>>= (>>= (pop) (λ (gi) (group-transaction-array gi f ai))) push)]
+      [(i:gload [group-index gi] i)
+       (>> (in-mode 'Application "gload")
+           (primitive-apply group-load 0 gi i))]
+      [(i:gloads i)
+       (>> (in-mode 'Application "gloads")
+           (>>= (>>= (pop) (λ (gi) (group-load gi i))) push))]
+      [(i:gaid [group-index gi])
+       (>> (in-mode 'Application "gaid")
+           (primitive-apply group-aid 0 gi))]
+      [(i:gaids)
+       (>> (in-mode 'Application "gaids")
+           (primitive-apply group-aid 1))]
+      [(i:loads)
+       (primitive-apply load 1)]
+      [(i:stores)
+       (primitive-apply store 2)]
+      [(i:bnz offset)
+       (>>= (>>= (pop) is-zero)
+            (λ (stay?)
+              (if stay?
+                continue
+                (jump offset))))]
+      [(i:bz offset)
+       (>>= (>>= (pop) is-zero)
+            (λ (jump?)
+              (if jump?
+                (jump offset)
+                continue)))]
+      [(i:b offset)
+       (jump offset)]
+      [(i:return)
+       (>>= (pop) return!)]
+      [(i:assert)
+       (>>= (pop)
+            (λ (x)
+              (>>= (is-zero x)
+                   (λ (fail?)
+                     (if fail?
+                       (panic "assert: ~v" x)
+                       continue)))))]
+      [(i:pop)
+       (>> (pop)
+           continue)]
+      [(i:dup)
+       (>>= (pop) (λ (x) (push x x)))]
+      [(i:dup2)
+       (>>= (pop 2) (λ (a b) (push a b a b)))]
+      [(i:dig n)
+       (>>= (let loop ([n n])
+              (>>= (pop)
+                   (λ (x)
+                     (if (zero? n)
+                       (>> (push x)
+                           (unit x))
+                       (>>= (loop (sub1 n))
+                            (λ (y)
+                              (push x)
+                              (unit y)))))))
+            push)]
+      [(i:swap)
+       swap]
+      [(i:select)
+       (>>= (pop 3)
+            (λ (a b c)
+              (>>= (is-zero c)
+                   (λ (zero?) (push (if zero? a b))))))]
+      [(i:cover n)
+       (>>= (pop)
+            (λ (x)
+              (let loop ([n n])
                 (if (zero? n)
-                  (apply unit xs)
-                  (>>= pop (λ (x) (loop (sub1 n) (cons x xs))))))
-              f)
-         push))
-  (define swap
-    (>>= pop
-         (λ (b)
-           (>>= pop
-                (λ (a)
-                  (>> (push b)
-                      (push a)))))))
-  (match-lambda
-    [`(err)
-     (panic "err")]
-    [`(sha256)
-     (stack-apply sha256 1)]
-    [`(+)
-     (stack-apply vm+ 2)]
-    [`(-)
-     (stack-apply vm- 2)]
-    [`(/)
-     (>>= pop
-          (λ (b)
-            (>>= pop
-                 (λ (a)
-                   (>>= (is-zero b)
-                        (λ (zero?)
-                          (if zero?
-                            (panic "/ by 0")
-                            (>>= (vm/ a b) push))))))))]
-    [`(*)
-     (stack-apply vm* 2)]
-    [`(<)
-     (stack-apply vm< 2)]
-    [`(>)
-     (>> swap
-         (stack-apply vm< 2))]
-    [`(<=)
-     (>> swap
-         (stack-apply vm< 2)
-         (stack-apply vm! 1))]
-    [`(>=)
-     (>> (stack-apply vm< 2)
-         (stack-apply vm! 1))]
-    [`(&&)
-     (stack-apply && 2)]
-    [`(\|\|)
-     (stack-apply \|\| 2)]
-    [`(==)
-     (stack-apply vm= 2)]
-    [`(!=)
-     (>> (stack-apply vm= 2)
-         (stack-apply vm! 1))]
-    [`(!)
-     (stack-apply vm! 1)]
-    [`(len)
-     (stack-apply len 1)]
-    [`(itob)
-     (stack-apply itob 1)]
-    [`(btoi)
-     (stack-apply btoi 1)]
-    [`(%)
-     (>>= pop
-          (λ (b)
-            (>>= pop
-                 (λ (a)
-                   (>>= (is-zero b)
-                        (λ (zero?)
-                          (if zero?
-                            (panic "% by 0")
-                            (>>= (% a b) push))))))))]
-    [`(~)
-     (stack-apply vm~ 1)]
-    [`(mulw)
-     (>>= pop (λ (b) (>>= pop (λ (a) (mulw a b)))))]
-    [`(addw)
-     (>>= pop (λ (b) (>>= pop (λ (a) (addw a b)))))]
-    [`(divmodw)
-     (>>= pop (λ (d) (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (divmodw a b c d)))))))))]
-    [`(intcblock . ,ns)
-     (put-intcblock ns)]
-    [`(intc ,i)
-     (>>= (lookup-intcblock i) push)]
-    [`(intc_0)
-     (>>= (lookup-intcblock 0) push)]
-    [`(intc_1)
-     (>>= (lookup-intcblock 1) push)]
-    [`(intc_2)
-     (>>= (lookup-intcblock 2) push)]
-    [`(intc_3)
-     (>>= (lookup-intcblock 3) push)]
-    [`(bytecblock . ,bss)
-     (put-bytecblock bss)]
-    [`(bytec ,i)
-     (>>= (lookup-bytecblock i) push)]
-    [`(bytec_0)
-     (>>= (lookup-bytecblock 0) push)]
-    [`(bytec_1)
-     (>>= (lookup-bytecblock 1) push)]
-    [`(bytec_2)
-     (>>= (lookup-bytecblock 2) push)]
-    [`(bytec_3)
-     (>>= (lookup-bytecblock 3) push)]
-    [`(txn ,f)
-     (>>= (transaction f) push)]
-    [`(global ,f)
-     (>>= (global f) push)]
-    [`(gtxn ,gi ,f)
-     (>>= (group-transaction gi f) push)]
-    [`(load ,i)
-     (>>= (load i) push)]
-    [`(store ,i)
-     (>>= pop (λ (x) (store i x)))]
-    [`(txna ,f ,ai)
-     (>> (lsv>= 2 "txna")
-         (>>= (transaction-array f ai) push))]
-    [`(gtxna ,gi ,f ,ai)
-     (>>= (group-transaction-array gi f ai) push)]
-    [`(gtxns ,f)
-     (>> (lsv>= 3 "gtxns")
-         (>>= (>>= pop (λ (gi) (group-transaction gi f))) push))]
-    [`(bnz ,offset)
-     (>>= (>>= pop is-zero)
-          (λ (stay?)
-            (if stay?
-              continue
-              (jump offset))))]
-    [`(bz ,offset)
-     (>>= (>>= pop is-zero)
-          (λ (jump?)
-            (if jump?
-              (jump offset)
-              continue)))]
-    [`(b ,offset)
-     (>> (lsv>= 2 "b")
-         (jump offset))]
-    [`(return)
-     (>> (lsv>= 2 "return")
-         (>>= pop return!))]
-    [`(assert)
-     (>> (lsv>= 3 "assert")
-         (>>= pop
-              (λ (x)
-                (>>= (is-zero x)
-                     (λ (fail?)
-                       (if fail?
-                         (panic "assert: ~v" x)
-                         continue))))))]
-    [`(pop)
-     (>> pop
-         continue)]
-    [`(dup)
-     (>>= pop
-          (λ (x)
-            (>> (push x)
-                (push x))))]
-    [`(dup2)
-     (>> (lsv>= 2 "dup2")
-         (>>= pop
-              (λ (b)
-                (>>= pop
-                     (λ (a)
-                       (>> (push a)
-                           (push b)
-                           (push a)
-                           (push b)))))))]
-    [`(dig ,n)
-     (>> (lsv>= 3 "dig")
-         (>>= (let loop ([n n])
-                (>>= pop
+                  (push x)
+                  (>>= (pop)
+                       (λ (x)
+                         (>> (loop (sub1 n))
+                             (push x))))))))]
+      [(i:uncover n)
+       (>>= (let loop ([n n])
+              (if (zero? n)
+                (pop)
+                (>>= (pop)
                      (λ (x)
-                       (if (zero? n)
-                         (>> (push x)
-                             (unit x))
-                         (>>= (loop (sub1 n))
-                              (λ (y)
-                                (push x)
-                                (unit y)))))))
-              push))]
-    [`(swap)
-     (>> (lsv>= 3 "swap")
-         swap)]
-    [`(select)
-     (>> (lsv>= 3 "select")
-         (>>= pop
-              (λ (c)
-                (>>= pop
-                     (λ (b)
-                       (>>= pop
-                            (λ (a)
-                              (>>= (is-zero c)
-                                   (λ (zero?) (push (if zero? a b)))))))))))]
-    [`(concat)
-     (>> (lsv>= 2 "concat")
-         (stack-apply concat 2))]
-    [`(substring ,s ,e)
-     (>> (lsv>= 2 "substring")
-         (>>= (>>= pop (λ (a) (substring a s e)))
-              push))]
-    [`(substring3)
-     (>> (lsv>= 2 "substring3")
-         (stack-apply substring 3))]
-    [`(getbyte)
-     (>> (lsv>= 3 "getbyte")
-         (stack-apply getbyte 2))]
-    [`(balance)
-     (>> (lsv>= 2 "balance")
-         (in-mode 'Application "balance")
-         (stack-apply balance 1))]
-    [`(app_local_get)
-     (>> (lsv>= 2 "app_local_get")
-         (in-mode 'Application "app_local_get")
-         (stack-apply app-local-get 2))]
-    [`(app_local_get_ex)
-     (>> (lsv>= 2 "app_local_get_ex")
-         (in-mode 'Application "app_local_get_ex")
-         (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-get-ex a b c))))))))]
-    [`(app_global_get)
-     (>> (lsv>= 2 "app_global_get")
-         (in-mode 'Application "app_global_get")
-         (stack-apply app-global-get 1))]
-    [`(app_global_get_ex)
-     (>> (lsv>= 2 "app_global_get_ex")
-         (in-mode 'Application "app_global_get_ex")
-         (>>= pop (λ (b) (>>= pop (λ (a) (app-global-get-ex a b))))))]
-    [`(app_local_put)
-     (>> (lsv>= 2 "app_local_put")
-         (in-mode 'Application "app_local_put")
-         (>>= pop (λ (c) (>>= pop (λ (b) (>>= pop (λ (a) (app-local-put a b c))))))))]
-    [`(app_global_put)
-     (>> (lsv>= 2 "app_global_put")
-         (in-mode 'Application "app_global_put")
-         (>>= pop (λ (b) (>>= pop (λ (a) (app-global-put a b))))))]
-    [`(app_local_del)
-     (>> (lsv>= 2 "app_local_del")
-         (in-mode 'Application "app_local_del")
-         (>>= pop (λ (b) (>>= pop (λ (a) (app-local-del a b))))))]
-    [`(asset_holding_get)
-     (>> (lsv>= 2 "asset_holding_get")
-         (in-mode 'Application "asset_holding_get")
-         (>>= (read-uint8 rb)
-              (λ (fi) (>>= pop (λ (b) (>>= pop (λ (a) (asset-holding-get a b fi))))))))]
-    [`(asset_params_get)
-     (>> (lsv>= 2 "asset_params_get")
-         (in-mode 'Application "asset_params_get")
-         (>>= (read-uint8 rb)
-              (λ (fi) (>>= pop (λ (a) (asset-params-get a fi))))))]
-    [`(min_balance)
-     (>> (lsv>= 3 "min_balance")
-         (in-mode 'Application "min_balance")
-         (stack-apply min-balance 1))]
-    [`(pushbytes ,bs)
-     (>> (lsv>= 3 "pushbytes")
-         (push bs))]
-    [`(pushint ,n)
-     (>> (lsv>= 3 "pushint")
-         (push n))]
-    [`(callsub ,offset)
-     (>> (lsv>= 4 "callsub")
-         (>>= get-pc
-              (λ (ret-pc)
-                (>> (push-call ret-pc)
-                    (jump offset)))))]
-    [`(retsub)
-     (>> (lsv>= 4 "retsub")
-         (>>= pop-call goto))]
-    [`(bzero)
-     (>> (lsv>= 4 "bzero")
-         (stack-apply bzero 1))]
-    [bc
-     (display "0x")
-     (displayln (number->string bc 16))
-     (failure-cont)]))
+                       (>>= (loop (sub1 n))
+                            (λ (y)
+                              (>> (push x)
+                                  (unit y))))))))
+            push)]
+      [(i:concat)
+       (primitive-apply concat 2)]
+      [(i:substring [start s] [end e])
+       (>>= (>>= (pop) (λ (a) (substring a s e))) push)]
+      [(i:substring3)
+       (primitive-apply substring 3)]
+      [(i:getbit)
+       (primitive-apply getbit 2)]
+      [(i:setbit)
+       (primitive-apply setbit 3)]
+      [(i:getbyte)
+       (primitive-apply getbyte 2)]
+      [(i:setbyte)
+       (primitive-apply setbyte 3)]
+      [(i:extract [start s] [length ℓ])
+       (>>= (>>= (pop) (λ (a) (extract a s ℓ))) push)]
+      [(i:extract3)
+       (primitive-apply extract 3)]
+      [(i:extract_uint16)
+       (primitive-apply extract-uint 2 2)]
+      [(i:extract_uint32)
+       (primitive-apply extract-uint 2 4)]
+      [(i:extract_uint64)
+       (primitive-apply extract-uint 2 8)]
+      [(i:balance)
+       (>> (in-mode 'Application "balance")
+           (primitive-apply balance 1))]
+      [(i:app_opted_in)
+       (>> (in-mode 'Application "app_opted_in")
+           (primitive-apply app-opted-in 2))]
+      [(i:app_local_get)
+       (>> (in-mode 'Application "app_local_get")
+           (primitive-apply app-local-get 2))]
+      [(i:app_local_get_ex)
+       (>> (in-mode 'Application "app_local_get_ex")
+           (primitive-apply app-local-get-ex 3))]
+      [(i:app_global_get)
+       (>> (in-mode 'Application "app_global_get")
+           (primitive-apply app-global-get 1))]
+      [(i:app_global_get_ex)
+       (>> (in-mode 'Application "app_global_get_ex")
+           (primitive-apply app-global-get-ex 2))]
+      [(i:app_local_put)
+       (>> (in-mode 'Application "app_local_put")
+           (primitive-apply app-local-put 3))]
+      [(i:app_global_put)
+       (>> (in-mode 'Application "app_global_put")
+           (primitive-apply app-global-put 2))]
+      [(i:app_local_del)
+       (>> (in-mode 'Application "app_local_del")
+           (primitive-apply app-local-del 2))]
+      [(i:app_global_del)
+       (>> (in-mode 'Application "app_global_del")
+           (primitive-apply app-global-del 1))]
+      [(i:asset_holding_get [field f])
+       (>> (in-mode 'Application "asset_holding_get")
+           (>>= (pop 2) (λ (a b) (asset-holding-get a b f))))]
+      [(i:asset_params_get [field f])
+       (>> (in-mode 'Application "asset_params_get")
+           (>>= (>>= (pop) (λ (a) (asset-params-get a f))) push))]
+      [(i:app_params_get [field f])
+       (>> (in-mode 'Application "app_params_get")
+           (>>= (>>= (pop) (λ (a) (app-params-get a f))) push))]
+      [(i:min_balance)
+       (>> (in-mode 'Application "min_balance")
+           (primitive-apply min-balance 1))]
+      [(i:pushbytes [bytes bs])
+       (push bs)]
+      [(i:pushint [uint n])
+       (push n)]
+      [(i:callsub offset)
+       (>>= get-pc
+            (λ (ret-pc)
+              (>> (push-call ret-pc)
+                  (jump offset))))]
+      [(i:retsub)
+       (>>= pop-call goto)]
+      [(i:shl)
+       (primitive-apply shl 2)]
+      [(i:shr)
+       (primitive-apply shr 2)]
+      [(i:sqrt)
+       (primitive-apply sqrt 1)]
+      [(i:bitlen)
+       (primitive-apply bitlen 1)]
+      [(i:exp)
+       (>>= (pop 2)
+            (λ (a b)
+              (>>= (is-zero a)
+                   (λ (is-zero-a?)
+                     (>>= (is-zero b)
+                          (λ (is-zero-b?)
+                            (if (and is-zero-a? is-zero-b?)
+                              (panic "exp: both arguments zero")
+                              (>>= (exp a b) push))))))))]
+      [(i:expw)
+       (>>= (pop 2)
+            (λ (a b)
+              (>>= (is-zero a)
+                   (λ (is-zero-a?)
+                     (>>= (is-zero b)
+                          (λ (is-zero-b?)
+                            (if (and is-zero-a? is-zero-b?)
+                              (panic "expw: both arguments zero")
+                              (>>= (expw a b) push))))))))]
+      [(i:b+)
+       (primitive-apply b+ 2)]
+      [(i:b-)
+       (primitive-apply b- 2)]
+      [(i:b/)
+       (>>= (pop 2)
+            (λ (a b)
+              (>>= (is-zero b)
+                   (λ (is-zero?)
+                     (if is-zero?
+                       (panic "b/: B is 0")
+                       (>>= (b/ a b) push))))))]
+      [(i:b*)
+       (primitive-apply b* 2)]
+      [(i:b<)
+       (primitive-apply b< 2)]
+      [(i:b>)
+       (primitive-apply b> 2)]
+      [(i:b<=)
+       (primitive-apply b<= 2)]
+      [(i:b>=)
+       (primitive-apply b>= 2)]
+      [(i:b==)
+       (primitive-apply b== 2)]
+      [(i:b!=)
+       (primitive-apply b!= 2)]
+      [(i:b%)
+       (>>= (pop 2)
+            (λ (a b)
+              (>>= (is-zero b)
+                   (λ (is-zero?)
+                     (if is-zero?
+                       (panic "b%: B is 0")
+                       (>>= (b% a b) push))))))]
+      [(i:b\|)
+       (primitive-apply b\| 2)]
+      [(i:b&)
+       (primitive-apply b& 2)]
+      [(i:b^)
+       (primitive-apply b^ 2)]
+      [(i:b~)
+       (primitive-apply b~ 2)]
+      [(i:bzero)
+       (primitive-apply bzero 1)]
+      [(i:log)
+       (>> (in-mode 'Application "log")
+           (primitive-apply log 1))]
+      [(i:itxn_begin)
+       (>> (in-mode 'Application "itxn_begin")
+           internal-transaction-begin)]
+      [(i:itxn_field [field f])
+       (>> (in-mode 'Application "itxn_field")
+           (primitive-apply internal-transaction-field 1 f))]
+      [(i:itxn_submit)
+       (>> (in-mode 'Application "itxn_submit")
+           internal-transaction-submit)]
+      [(i:itxn [field f])
+       (>> (in-mode 'Application "itxn")
+           (primitive-apply internal-transaction 0 f))]
+      [(i:itxna [field f] [array-index ai])
+       (>> (in-mode 'Application "itxna")
+           (primitive-apply internal-transaction-array 0 f ai))]
+      [(i:txnas [field f])
+       (primitive-apply transaction-array 1 f)]
+      [(i:gtxnas [group-index gi] [field f])
+       (primitive-apply group-transaction-array 1 gi f)]
+      [(i:gtxnsas [field f])
+       (>>= (>>= (pop 2) (λ (gi ai) (group-transaction-array gi f ai))) push)]
+      [(i:args)
+       (>> (in-mode 'Signature "args")
+           (primitive-apply args 1))])))
 
 ; step : VM m s => m ()
 (define (step vm)
-  (match-define (VM [MonadPlus (MonadPlus [Monad (Monad >>= >>)])]
-                    [ReadByte rb]
+  (match-define (VM [monad+ (Monad+ [monad (Monad >>= >>)])]
+                    [read-byte rb]
                     check-final)
     vm)
-  (>> (>>= (read-instruction rb)
-           (execute vm))
+  (>> (>>= (i:read-instruction rb)
+           (λ (instr)
+             (>> ((logic-sig-version>= vm)
+                  (i:instruction-logic-signature-version instr)
+                  (i:instruction-name instr))
+                 ((execute vm) instr))))
       check-final))
 
+; logic-sig-version>= : VM m s => integer string -> m ()
 (define (logic-sig-version>= vm)
-  (match-define (VM [MonadPlus (MonadPlus [Monad (Monad unit >>=)])]
+  (match-define (VM [monad+ (Monad+ [monad (Monad unit >>=)])]
                     logic-sig-version
                     panic)
     vm)

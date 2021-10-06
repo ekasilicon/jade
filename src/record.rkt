@@ -74,7 +74,8 @@
           (syntax-parse stx
             [(_ fp:field-pat ...)
              #'(? pred (and (app (λ (x) (ref x fp.field-index)) fp.pattern)
-                            ...))]))))))
+                            ...))])))))
+  (provide record-info record-info?))
 
 (define-syntax record
   (syntax-parser
@@ -85,7 +86,10 @@
              (make-struct-type 'name
                                #f
                                num-fields
-                               0))
+                               0
+                               #f
+                               (list)
+                               #f))
            (define-syntax name
              (record-info '(field ...) #'type #'cons #'? #'ref #'set!))))]))
 

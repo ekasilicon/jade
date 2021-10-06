@@ -2,67 +2,68 @@
 (require racket/match
          racket/set
          (only-in racket/list append-map)
+         "sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
          "prefix.rkt"
-         "vm.rkt")
+         "vm.rkt"
+         (prefix-in i: "instruction.rkt"))
 
-(struct underway (xs state))
-(struct returned (code))
-(struct failure! (msg))
+(define-sumtype Result
+  (underway values state)
+  (returned code)
+  (failure! message))
+
+(define ((unit . xs) st)
+  (list (underway [values xs] [state st])))
+
+(define ((>>= m f) st)
+  (append-map
+   (λ (r)
+     (sumtype-case Result r
+       [(underway [values xs] [state st])
+        ((apply f xs) st)]
+       [else (list r)]))
+   (m st)))
+
+(define (>> m . ms)
+  (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))
 
 ; (define-type (Step a) (→ (State) (Result a))
-(define step-Monad
-  (Monad [unit (λ xs (λ (st) (list (underway xs st))))]
-         [>>= (λ (m f)
-                (λ (st)
-                  (append-map
-                   (match-lambda
-                     [(underway xs st)
-                      ((apply f xs) st)]
-                     [r (list r)])
-                   (m st))))]
-         [>> (λ (m₀ m₁)
-               (λ (st)
-                 (append-map
-                  (match-lambda
-                    [(underway xs st)
-                     (m₁ st)]
-                    [r (list r)])
-                  (m₀ st))))]))
+(define step-Monad (Monad unit >>= >>))
 
-(define ((return x) st)
-  (list (returned x)))
+(define ((return code) st)
+  (list (returned code)))
 (define ((panic template . args) st)
-  (list (failure! (apply format template args))))
+  (list (failure! [message (apply format template args)])))
 
 
 ; get : key -> Step a
 (define-syntax get
   (syntax-rules ()
     [(_ key)
-     (λ (st) (list (underway (list (hash-ref st 'key)) st)))]
+     (λ (st) (list (underway [values (list (hash-ref st 'key))] [state st])))]
     [(_ key default)
-     (λ (st) (list (underway (list (hash-ref st 'key default)) st)))]))
+     (λ (st) (list (underway [values (list (hash-ref st 'key default))] [state st])))]))
 ; set : key val -> Step ()
 (define-syntax-rule (put key val)
-  (λ (st) (list (underway (list) (hash-set st 'key val)))))
+  (λ (st) (list (underway [values (list)] [state (hash-set st 'key val)]))))
 ; update : key f -> Step ()
 (define-syntax update
   (syntax-rules ()
     [(_ key f)
-     (λ (st) (list (underway (list) (hash-update st 'key f))))]
+     (λ (st) (list (underway [values (list)] [state (hash-update st 'key f)])))]
     [(_ key f iv)
-     (λ (st) (list (underway (list) (hash-update st 'key f iv))))]))
+     (λ (st) (list (underway [values (list)] [state (hash-update st 'key f iv)])))]))
 
-(define step-MonadPlus
-  (MonadPlus [Monad step-Monad]
-             [mzero (λ (st) (list))]
-             [mplus (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))]))
+(define step-Monad+
+  (Monad+ [monad step-Monad]
+          [mzero (λ (st) (list))]
+          [mplus (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))]))
 
 (define step-ReadByte
   (match-let ([(Monad unit >>= >>) step-Monad])
-    (ReadByte [Monad step-Monad]
+    (ReadByte [monad step-Monad]
               [read-byte (>>= (get bytecode)
                               (λ (bc)
                                 (>>= (get pc)
@@ -84,7 +85,11 @@
 
 ; instance VM <hash-thing>
 (define step-VM
-  (match-let ([(MonadPlus [Monad (Monad unit >>= >>)] mzero mplus) step-MonadPlus])
+  (match-let ([(Monad+ [monad (Monad unit >>= >>)] mzero mplus) step-Monad+])
+    (define can-affirm?
+      (match-lambda
+        [`(= ,x ,y)
+         (unit (equal? x y))]))
     (define (interpretation #:assume assume #:reject reject)
       (match-lambda
         [`(¬ ,c) (reject c)]
@@ -128,42 +133,87 @@
        (interpretation
         #:assume
         (letrec ([recur (match-lambda
-                          [`(= OnCompletion ,oc)
-                           (and (memq oc '(0 1 2 4 5))
-                                (>>= (get OnCompletion #f)
-                                     (match-lambda
-                                       [#f
-                                        (put OnCompletion `(known ,oc))]
-                                       [`(known ,oc₀)
-                                        (assume `(= ,oc₀ ,oc))]
-                                       [`(unknown ,ocs)
-                                        (for/fold ([m (put OnCompletion `(known, oc))])
-                                                  ([oc₀ (in-list ocs)])
-                                          (>> (reject `(= ,oc₀ ,oc))
-                                              m))])))]
-                          [`(= ,oc OnCompletion)
-                           (recur `(= OnCompletion ,oc))]
+                          [`(= ,(i:OnCompletion) ,oc)
+                           (>>= (get OnCompletion #f)
+                                (match-lambda
+                                  [#f
+                                   (put OnCompletion `(= ,oc))]
+                                  [`(= ,oc₀)
+                                   (assume `(= ,oc₀ ,oc))]
+                                  [`(≠ ,ocs)
+                                   (for/fold ([m (put OnCompletion `(= ,oc))])
+                                             ([oc₀ (in-list ocs)])
+                                     (>> (reject `(= ,oc₀ ,oc))
+                                         m))]))]
+                          [`(= ,oc ,(i:OnCompletion))
+                           (recur `(= ,(i:OnCompletion) ,oc))]
                           [_ #f])])
           recur)
         #:reject
         (letrec ([recur (match-lambda
-                          [`(= OnCompletion ,oc)
-                           (and (memq oc '(0 1 2 4 5))
-                                (>>= (get OnCompletion #f)
-                                     (match-lambda
-                                       [#f
-                                        (put OnCompletion `(unknown ,(list oc)))]
-                                       [`(known ,oc₀)
-                                        (reject `(= ,oc₀ ,oc))]
-                                       [`(unknown ,ocs)
-                                        (if (memq oc ocs)
-                                          (unit)
-                                          (put OnCompletion `(unknown ,(cons oc ocs))))])))]
-                          [`(= ,oc OnCompletion)
-                           (recur `(= OnCompletion ,oc))]
+                          [`(= ,(i:OnCompletion) ,oc)
+                           (>>= (get OnCompletion #f)
+                                (match-lambda
+                                  [#f
+                                   (put OnCompletion `(≠ ,(list oc)))]
+                                  [`(= ,oc₀)
+                                   (reject `(= ,oc₀ ,oc))]
+                                  [`(≠ ,oc₀s)
+                                   (if (let loop ([oc₀s oc₀s])
+                                         (match oc₀s
+                                           [(list)
+                                            #f]
+                                           [(cons oc₀ oc₀s)
+                                            (>>= (can-affirm? `(= ,oc₀ ,oc))
+                                                 (λ (=?) (or =? (loop oc₀s))))]))
+                                     (unit)
+                                     (put OnCompletion `(≠ ,(cons oc oc₀s))))]))]
+                          [`(= ,oc ,(i:OnCompletion))
+                           (recur `(= ,(i:OnCompletion) ,oc))]
                           [_ #f])])
           recur))
-       
+       (interpretation
+        #:assume
+        (letrec ([recur (match-lambda
+                          [`(= ,(i:RekeyTo) ,rt)
+                           (>>= (get RekeyTo #f)
+                                (match-lambda
+                                  [#f
+                                   (put RekeyTo `(= ,rt))]
+                                  [`(= ,rt₀)
+                                   (assume `(= ,rt₀ ,rt))]
+                                  [`(≠ ,rt₀s)
+                                   (for/fold ([m (put RekeyTo `(= ,rt))])
+                                             ([rt₀ (in-list rt₀s)])
+                                     (>> (reject `(= ,rt₀ ,rt))
+                                         m))]))]
+                          [`(= ,rt ,(i:RekeyTo))
+                           (recur `(= ,(i:RekeyTo) ,rt))]
+                          [_ #f])])
+          recur)
+        #:reject
+        (letrec ([recur (match-lambda
+                          [`(= ,(i:RekeyTo) ,rt)
+                           (>>= (get RekeyTo #f)
+                                (match-lambda
+                                  [#f
+                                   (put RekeyTo `(≠ ,(list rt)))]
+                                  [`(= ,rt₀)
+                                   (reject `(= ,rt₀ ,rt))]
+                                  [`(≠ ,rt₀s)
+                                   (if (let loop ([rt₀s rt₀s])
+                                         (match rt₀s
+                                           [(list)
+                                            #f]
+                                           [(cons rt₀ rt₀s)
+                                            (>>= (can-affirm? `(= ,rt₀ ,rt))
+                                                 (λ (=?) (or =? (loop rt₀s))))]))
+                                     (unit)
+                                     (put RekeyTo `(≠ ,(cons rt rt₀s))))]))]
+                          [`(= ,rt ,(i:RekeyTo))
+                           (recur `(= ,(i:RekeyTo) ,rt))]
+                          [_ #f])])
+          recur))
        (interpretation
         #:assume
         (match-lambda
@@ -277,34 +327,10 @@
     (define (log template . args)
       (update execution-log (λ (msgs) (cons (apply format template args) msgs))))
     (define (transaction-field f)
-      (cond
-        [(memq f '(Sender Fee FirstValid FirstValidTime LastValid Note Lease
-                   Receiver Amount CloseRemainderTo VotePK SelectionPK VoteFirst
-                   VoteLast VoteKeyDilution Type TypeEnum XferAsset AssetAmount
-                   AssetSender AssetReceiver AssetCloseTo GroupIndex TxID))
-         (unit f)]
-        [(memq f '(ApplicationID OnCompletion ApplicationArgs NumAppArgs Accounts
-                   NumAccounts ApprovalProgram ClearStateProgram RekeyTo ConfigAsset
-                   ConfigAssetTotal ConfigAssetDecimals ConfigAssetDefaultFrozen
-                   ConfigAssetUnitName ConfigAssetName ConfigAssetURL
-                   ConfigAssetMetadataHash ConfigAssetManager ConfigAssetReserve
-                   ConfigAssetFreeze ConfigAssetClawback FreezeAsset
-                   FreezeAssetAccount FreezeAssetFrozen))
-         (>> ((logic-sig-version>= step-VM) 2 (symbol->string f))
-             (unit f))]
-        [(memq f '(Assets NumAssets Applications NumApplications GlobalNumUint
-                   GlobalNumByteSlice LocalNumUint LocalNumByteSlice))
-         (>> ((logic-sig-version>= step-VM) 3 (symbol->string f))
-             (unit f))]
-        [(memq f '(ExtraProgramPages))
-         (>> ((logic-sig-version>= step-VM) 4 (symbol->string f))
-             (unit f))]
-        [(memq f '(Nonparticipation Logs NumLogs CreatedAssetID
-                   CreatedApplicationID))
-         (>> ((logic-sig-version>= step-VM) 5 (symbol->string f))
-             (unit f))]
-        [else
-         (error 'transaction-field "unknown transaction field ~a" f)]))
+      (>> ((logic-sig-version>= step-VM)
+           (i:transaction-field-logic-signature-version f)
+           (i:transaction-field-name f))
+          (unit f)))
     (define (group-transaction gi f)
       (>>= (transaction-field f)
            (λ (f)
@@ -317,8 +343,8 @@
              (if (eq? gi 'this-group-index)
                (unit `(,f ,ai))
                (unit `(txn ,gi ,f ,ai))))))
-    (VM [MonadPlus step-MonadPlus]
-        [ReadByte step-ReadByte]
+    (VM [monad+ step-Monad+]
+        [read-byte step-ReadByte]
         panic
         [return! return]
         [logic-sig-version (get logic-sig-version)]
@@ -445,35 +471,41 @@
                     (panic "byte access out of bounds: ~v" `(getbyte ,a ,b)))))]
         [global
          (λ (f)
-           (match f
-             [(or 'MinTxnFee 'MinBalance 'MaxTxnLife 'GroupSize)
-              (unit f)]
-             ['ZeroAddress
+           (sumtype-case i:GlobalField f
+             [(i:MinTxnFee)
+              (unit (i:MinTxnFee))]
+             [(i:MinBalance)
+              (unit (i:MinBalance))]
+             [(i:MaxTxnLife)
+              (unit (i:MaxTxnLife))]
+             [(i:GroupSize)
+              (unit (i:GroupSize))]
+             [(i:ZeroAddress)
               (>> (log "The ZeroAddress symbolic constant represents a single value. Make sure the theories respect it.")
-                  (unit 'ZeroAddress))]
-             ['LogicSigVersion
+                  (unit (i:ZeroAddress)))]
+             [(i:LogicSigVersion)
               (>> ((logic-sig-version>= step-VM) 2 "LogicSigVersion")
                   (get logic-sig-version))]
-             ['Round
+             [(i:Round)
               (>> ((logic-sig-version>= step-VM) 2 "Round")
-                  (unit 'Round))]
-             ['LatestTimestamp
+                  (unit (i:Round)))]
+             [(i:LatestTimestamp)
               (>> ((logic-sig-version>= step-VM) 2 "LatestTimestamp")
                   (>> (log "LatestTimestamp fails if the timestamp given is less than zero. This is neither under the control of the program, nor tracked by the machine.")
-                      (unit 'LatestTimestamp)))]
-             ['CurrentApplicationID
+                      (unit (i:LatestTimestamp))))]
+             [(i:CurrentApplicationID)
               (>> ((logic-sig-version>= step-VM) 2 "CurrentApplicationID")
-                  (unit 'CurrentApplicationID))]
-             ['CreatorAddress
+                  (unit (i:CurrentApplicationID)))]
+             [(i:CreatorAddress)
               ; "Address of the creator of the current application. Fails if no such application is executing."
               (>> ((logic-sig-version>= step-VM) 3 "CreatorAddress")
-                  (unit 'CreatorAddress))]
-             ['CurrentApplicationAddress
+                  (unit (i:CreatorAddress)))]
+             [(i:CurrentApplicationAddress)
               (>> ((logic-sig-version>= step-VM) 5 "CurrentApplicationAddress")
-                  (unit 'CurrentApplicationAddress))]
-             ['GroupID
+                  (unit (i:CurrentApplicationAddress)))]
+             [(i:GroupID)
               (>> ((logic-sig-version>= step-VM) 5 "GroupID")
-                  (unit 'GroupID))]))]
+                  (unit (i:GroupID)))]))]
         [transaction (λ (fi) (group-transaction 'this-group-index fi))]
         group-transaction
         ; transaction-array
@@ -600,9 +632,9 @@
        (foldl
         (λ (r fs)
           (match r
-            [(underway (list) st)
+            [(underway [values (list)] [state st])
              (loop st fs)]
-            [(failure! msg)
+            [(failure! [message _])
              fs]
             [(returned code)
              (if (zero? code)
@@ -613,18 +645,19 @@
     [#f
      (error 'analyze "unable to read initial logic signature version")]))
 
+(require racket/pretty)
+
+(define (summarize fs)
+  (pretty-print fs)
+  
+  (set-count fs))
 
 
 (module+ main
   (require racket/port
            racket/pretty)
 
-  (for-each
-   (match-lambda
-     [(cons code st)
-      (displayln code)
-      (pretty-print (hash-remove st 'bytecode))])
-   (set->list (run (port->bytes (current-input-port))))) 
+  (summarize (run (port->bytes (current-input-port)))) 
 
   #;
   (match (current-command-line-arguments)
