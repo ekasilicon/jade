@@ -13,31 +13,39 @@
 
 (define-syntax (define-sumtype stx)
   (define-syntax-class variant
-    #:attributes [name declaration]
+    #:attributes [names declaration]
+    (pattern (recname:id field:id ...) 
+             #:attr names #'(recname)
+             #:attr declaration #'(record recname (field ...)))
+    (pattern sumname:id
+             #:when (sumtype-info? (syntax-local-value #'sumname (λ () #f)))
+             #:with (recname ...) (sumtype-info-variants (syntax-local-value #'sumname))
+             #:attr names #'(recname ...)
+             #:attr declaration #'(void))
     (pattern recname:id
              #:when (record-info? (syntax-local-value #'recname (λ () #f)))
-             #:attr name #'recname
-             #:attr declaration #'(void))
-    (pattern (recname:id field:id ...) 
-             #:attr name #'recname
-             #:attr declaration #'(record recname (field ...))))
+             #:attr names #'(recname)
+             #:attr declaration #'(void)))
   (syntax-parse stx
-    [(_ name:id decl:variant ...)
-     (let loop ([names (syntax->list #'(decl.name ...))])
-       (match names
-         [(list)
-          #'(begin
-              decl.declaration ...
-              (define-syntax name
-                (sumtype-info (list #'decl.name ...))))]
-         [(cons name names)
-          (cond
-            [(for/first ([name₀ (in-list names)]
-                         #:when (free-identifier=? name name₀))
-               name₀)
-             => (λ (name) (raise-syntax-error #f "duplicate variant" name))]
-            [else
-             (loop names)])]))]))
+    [(_ sumname:id decl:variant ...)
+     (let ([names (apply append (map syntax->list (syntax->list #'(decl.names ...))))])
+       (let loop ([names names])
+         (match names
+           [(list)
+            (void)]
+           [(cons name names)
+            (cond
+              [(for/first ([name₀ (in-list names)]
+                           #:when (free-identifier=? name name₀))
+                 name₀)
+               => (λ (name) (raise-syntax-error #f (format "duplicate variant ~a" (syntax->datum name)) #'sumname))]
+              [else
+               (loop names)])]))
+       (with-syntax ([(decl-name ...) names])
+         #'(begin
+             decl.declaration ...
+             (define-syntax sumname
+               (sumtype-info (list #'decl-name ...))))))]))
 
 (require (for-syntax racket/pretty))
 
@@ -59,7 +67,7 @@
                (remove variant variants free-identifier=?)
                (if (member variant variants₀ free-identifier=?)
                  (raise-syntax-error #f "duplicate variant" variant)
-                 (raise-syntax-error #f "unknown variant" variant))))
+                 (raise-syntax-error #f "unnecessary variant" variant))))
            variants₀
            variants₁))
   (define (variants-subtract* variants₀ variants₁s-stx)
@@ -126,4 +134,43 @@
 ; 1. allow the else form of a sumtype-case-lambda to name the argument
 ; 2. make sumtype user-extensible? define-sumtype-clause?
 
+(module+ test
+  (define-sumtype Test
+    (a)
+    (b)
+    (c))
+
+  (sumtype-case Test (a)
+    [(a) 10]
+    [else 20])
+
+  (define-sumtype Test2
+    Test
+    (d))
+
+  (sumtype-case Test2 (d)
+    [(d) 20]
+    [(a) 12]
+    [(b) 10]
+    [(c) 9])
+
+  (define-sumtype Test4
+    (e)
+    (f))
+  
+  (define-sumtype Test3
+    Test
+    Test4)
+
+  (define-sumtype Test5
+    a
+    b
+    d
+    e)
+
+  (sumtype-case Test5 (a)
+    [(a) 10]
+    [(b) 11]
+    [(d) 12]
+    [(e) 143]))
 

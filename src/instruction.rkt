@@ -235,6 +235,31 @@
          read-asset-params-field
          asset-params-field-logic-signature-version)
 
+(define-sumtype AppParamsField
+  (AppApprovalProgram)
+  (AppClearStateProgram)
+  (AppGlobalNumUint)
+  (AppGlobalNumByteSlice)
+  (AppLocalNumUint)
+  (AppLocalNumByteSlice)
+  (AppExtraProgramPages)
+  (AppCreator)
+  (AppAddress))
+
+(define app-params-field
+  (index→enumtype AppParamsField))
+
+(define app-params-field-name
+  (sumtype-name AppParamsField))
+
+(define (read-app-params-field rb)
+  (match-define (ReadByte [monad (Monad unit >>=)]) rb)
+  (>>= (read-uint8 rb) (λ (i) (unit (app-params-field i)))))
+
+(provide (sumtype-out AppParamsField)
+         app-params-field-name
+         read-app-params-field)
+
 (define-sumtype Instruction
   (err)
   (sha256)

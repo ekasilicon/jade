@@ -6,27 +6,14 @@
          "sumtype.rkt"
          (prefix-in i: "instruction.rkt"))
 
-; there are two notions of failure, "uncommitted" and "committed"
-; a committed failure occurs when the parse definitely couldn't
-; recover, usually because the line prefix does not reach a
-; commit point for any other rule.
-; a committed failure allows the problem area to be reported with
-; greater precision.
-; unfortunately, commit points are inserted manually at this point.
-
-(record success (values index))
-(record failure (message))
+; Need to add cut so that committed failure can be represented
+; and better errors can be reported.
 
 (define ((unit . xs) input i sk fk) (sk xs i fk))
 (define (fail input i sk fk) (fk))
 
 (define ((>>= m f) input i sk fk)
-  (m input i (λ (xs i fk) ((apply f xs) input i sk fk)) fk)
-  #;
-  (match (m input i fk)
-    [(success [values xs] [index i])
-     ((apply f xs) input i)]
-    [r r]))
+  (m input i (λ (xs i fk) ((apply f xs) input i sk fk)) fk))
 
 (define (>> m . ms)
   (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))
@@ -51,31 +38,21 @@
        (>>= p (λ (x) (>>= (loop ps) (λ xs (apply unit x xs)))))])))
 
 (define ((p* p) input i sk fk) 
-  (let loop ([i i]
-             [xs (list)]
+  (let loop ([xs (list)]
+             [i i]
              [fk fk])
     (p input i (λ (x i fk)
                  (match x
                    [(list x)
-                    (loop i (cons x xs) fk)]
+                    (loop (cons x xs) i fk)]
                    [_
                     (error 'p* "expected a single result")]) )
-       (λ () (sk (list (reverse xs)) i fk)))
-    #;
-    (match (p input i)
-      [(success [values (list x)] [index i])
-       (loop i (cons x xs))]
-      [(failure [message msg])
-       (error 'parse "repetition has a failure of its own with message ~s" msg)]
-      [#f
-       (success [values (list (reverse xs))] [index i])])))
+       (λ () (sk (list (reverse xs)) i fk)))))
 
 (define (p+ p)
   (>>= p (λ (x) (>>= (p* p) (λ (xs) (unit (cons x xs)))))))
 
-(define ((p? p) input i sk fk)
-  (p input i sk (λ () (sk (list #f) i fk)))
-  #;
+(define (p? p)
   (∨ p (unit #f)))
 
 (define (cc ?)
@@ -128,15 +105,7 @@
   (substring input i (min (string-length input) (+ i 64))))
 
 (define ((report p template) input i sk fk)
-  (p input i sk (λ () (error template (snippet input i))))
-  #;
-  (match (p input i)
-    [(success [values xs] [index i])
-     (success [values xs] [index i])]
-    [(failure [message msg])
-     (failure [message msg])]
-    [#f
-     (failure [message (format template (snippet input i))])]))
+  (p input i sk (λ () (error template (snippet input i)))))
 
 (define ((trace which p) input i sk fk)
   (displayln 'TRACE)
@@ -149,16 +118,7 @@
                (sk x i fk))
      (λ ()
        (displayln "FAILED")
-       (fk)))
-  #;
-  (cond
-    [(p input i)
-     => (λ (r)
-          (println r)
-          r)]
-    [else
-     (displayln "FAILED")
-     #f]))
+       (fk))))
 
 (define ((not-implemented id) input i sk fk)
   (error 'parse "not implemented at ~a and ~s" id (snippet input i)))
@@ -240,13 +200,14 @@ byte[+ ](hex-number)
 byte[+ ](string)
 |#
 
+(record pragma (content))
 
-(define pragma
+(define pragma-directive
   (>> (literal "#pragma ")
       (>>= (p* (cc (^ "\r\n")))
-           (lift (λ (cs) `(pragma ,(apply string cs)))))))
+           (lift (λ (cs) (pragma [content (apply string cs)]))))))
 
-(define (make-instruction name . arguments)
+(define (make-instruction name constructor . arguments)
   (>>= (make-symbol name)
        (λ (id)
          (>>= (let loop ([args arguments])
@@ -259,80 +220,7 @@ byte[+ ](string)
                             (λ (x)
                               (>>= (loop args)
                                    (λ (xs) (unit (cons x xs)))))))]))
-              (λ (xs) (unit `(,id . ,xs)))))))
-
-(define arithmetic-logic-cryptographic-instruction
-  (apply ∨
-   (map make-instruction (string-split #<<EOF
-sha256
-keccak256
-sha512_256
-ed25519verify
-+
--
-/
-*
-<=
->=
-<
->
-&&
-||
-shl
-shr
-sqrt
-bitlen
-exp
-==
-!=
-!
-len
-itob
-btoi
-%
-|
-&
-^
-~
-mulw
-addw
-divmodw
-expw
-getbit
-setbit
-getbyte
-setbyte
-concat
-EOF
-                                               ))))
-
-(define byte-array-extract-instruction
-  (∨ (make-instruction "substring" uint8 uint8)
-     (make-instruction "substring3")
-     (make-instruction "extract" uint8 uint8)
-     (make-instruction "extract3")
-     (make-instruction "extract16bits")
-     (make-instruction "extract32bits")
-     (make-instruction "extract64bits")))
-
-(define byte-array-arithmetic-instruction
-  (∨ (make-instruction "b+")
-     (make-instruction "b-")
-     (make-instruction "b/")
-     (make-instruction "b*")
-     (make-instruction "b<")
-     (make-instruction "b>")
-     (make-instruction "b<=")
-     (make-instruction "b>=")
-     (make-instruction "b==")
-     (make-instruction "b!=")
-     (make-instruction "b%")))
-
-(define byte-array-logic-instruction
-  (∨ (make-instruction "b|")
-     (make-instruction "b&")
-     (make-instruction "b^")
-     (make-instruction "b~")))
+              (λ (xs) (unit (apply constructor xs)))))))
 
 (require (for-syntax racket/base
                      racket/match
@@ -349,223 +237,76 @@ EOF
        [_ (raise-syntax-error #f "not a sumtype" #'typename)])]))
 
 (define transaction-field
-  (enumtype-parser i:TransactionField)
-  #;
-  (apply ∨ (map make-symbol (string-split
-                             #<<EOF
-Sender
-Fee
-FirstValidTime
-FirstValid
-LastValid
-Note
-Lease
-Receiver
-Amount
-CloseRemainderTo
-VotePK
-SelectionPK
-VoteFirst
-VoteLast
-VoteKeyDilution
-TypeEnum
-Type
-XferAsset
-AssetAmount
-AssetSender
-AssetReceiver
-AssetCloseTo
-GroupIndex
-TxID
-ApplicationID
-OnCompletion
-ApplicationArgs
-NumAppArgs
-Accounts
-NumAccounts
-ApprovalProgram
-ClearStateProgram
-RekeyTo
-ConfigAssetTotal
-ConfigAssetDecimals
-ConfigAssetDefaultFrozen
-ConfigAssetUnitName
-ConfigAssetName
-ConfigAssetURL
-ConfigAssetMetadataHash
-ConfigAssetManager
-ConfigAssetReserve
-ConfigAssetFreeze
-ConfigAssetClawback
-ConfigAsset
-FreezeAssetAccount
-FreezeAssetFrozen
-FreezeAsset
-Assets
-NumAssets
-Applications
-NumApplications
-GlobalNumUint
-GlobalNumByteSlice
-LocalNumUint
-LocalNumByteSlice
-ExtraProgramPages
-Nonparticipation
-EOF
-                             ))))
-
-(define inner-transaction-instruction
-  (∨ (make-instruction "tx_begin")
-     (make-instruction "tx_field" transaction-field)
-     (make-instruction "tx_submit")))
+  (enumtype-parser i:TransactionField))
 
 (define global-field
-  (apply ∨ (map make-symbol (string-split
-                             #<<EOF
-MinTxnFee
-MinBalance
-MaxTxnLife
-ZeroAddress
-GroupSize
-LogicSigVersion
-Round
-LatestTimestamp
-CurrentApplicationID
-CreatorAddress
-CurrentApplicationAddress
-GroupID
-EOF
-                             ))))
+  (enumtype-parser i:GlobalField))
 
-(define value-loading-instruction
-  (∨ (>> (literal "intcblock")
-         (>>= (p* (>> whitespace+ varuint))
-              (λ (varuints) `(intcblock . ,varuints))))
-     (make-instruction "intc" varuint)
-     (make-instruction "intc_0")
-     (make-instruction "intc_1")
-     (make-instruction "intc_2")
-     (make-instruction "intc_3")
-     (make-instruction "int" varuint) ; pseudo instruction
-     (make-instruction "pushint" varuint)
-     (>> (literal "bytecblock")
-         (>>= (p* (>> whitespace+ pbytes))
-              (λ (bytess) `(bytecblock . ,bytess))))
-     (make-instruction "bytec" varuint)
-     (make-instruction "bytec_0")
-     (make-instruction "bytec_1")
-     (make-instruction "bytec_2")
-     (make-instruction "bytec_3")
-     (make-instruction "byte" pbytes) ; pseudo instruction
-     (make-instruction "pushbytes" pbytes)
-     (make-instruction "bzero")
-     (make-instruction "arg" uint8)
-     (make-instruction "arg_0")
-     (make-instruction "arg_1")
-     (make-instruction "arg_2")
-     (make-instruction "arg_3")
-     (make-instruction "txn" transaction-field)
-     (make-instruction "gtxn" uint8 transaction-field)
-     (make-instruction "txna" transaction-field uint8)
-     (make-instruction "gtxna" uint8 transaction-field uint8)
-     (make-instruction "gtxnas" uint8 transaction-field)
-     (make-instruction "gtxns" transaction-field)
-     (make-instruction "gtxnsa" transaction-field uint8)
-     (make-instruction "gtxnsas" transaction-field)
-     (make-instruction "global" global-field)
-     (make-instruction "load" uint8)
-     (make-instruction "loads")
-     (make-instruction "store" uint8)
-     (make-instruction "stores")
-     (make-instruction "gload" uint8 uint8)
-     (make-instruction "gloads" uint8)
-     (make-instruction "gaid" uint8)
-     (make-instruction "gaids")
-     (make-instruction "args")))
-
-(define label
+(define label-identifier
   (>>= (∘ (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-"))
           (p* (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")))) 
        (lift (λ (c cs) (string->symbol (apply string c cs))))))
 
 (define guarded-label
-  (report label "expected a label but got ~s"))
-
-(define flow-control-instruction
-  (∨ (make-instruction "err")
-     (make-instruction "bnz" guarded-label)
-     (make-instruction "bz" guarded-label)
-     (make-instruction "b" guarded-label)
-     (make-instruction "return")
-     (make-instruction "pop")
-     (make-instruction "dup")
-     (make-instruction "dup2")
-     (make-instruction "dig" uint8)
-     (make-instruction "cover" uint8)
-     (make-instruction "uncover" uint8)
-     (make-instruction "swap")
-     (make-instruction "select")
-     (make-instruction "assert")
-     (make-instruction "callsub" guarded-label)
-     (make-instruction "retsub")))
+  (report label-identifier "expected a label but got ~s"))
 
 (define asset-holding-field
-  (∨ (make-symbol "AssetBalance")
-     (make-symbol "AssetFrozen")))
+  (enumtype-parser i:AssetHoldingField))
 
 (define asset-params-field
-  (∨ (make-symbol "AssetTotal")
-     (make-symbol "AssetDecimals")
-     (make-symbol "AssetDefaultFrozen")
-     (make-symbol "AssetUnitName")
-     (make-symbol "AssetName")
-     (make-symbol "AssetURL")
-     (make-symbol "AssetMetadataHash")
-     (make-symbol "AssetManager")
-     (make-symbol "AssetReserve")
-     (make-symbol "AssetFreeze")
-     (make-symbol "AssetClawback")
-     (make-symbol "AssetCreator")))
+  (enumtype-parser i:AssetParamsField))
 
-(define app-field
-  (∨ (make-symbol "AppApprovalProgram")
-     (make-symbol "AppClearStateProgram")
-     (make-symbol "AppGlobalNumUint")
-     (make-symbol "AppGlobalNumByteSlice")
-     (make-symbol "AppLocalNumUint")
-     (make-symbol "AppLocalNumByteSlice")
-     (make-symbol "AppExtraProgramPages")
-     (make-symbol "AppCreator")
-     (make-symbol "AppAddress")))
+(define app-params-field
+  (enumtype-parser i:AppParamsField))
 
-(define state-access-instruction
-  (∨ (make-instruction "balance")
-     (make-instruction "min_balance")
-     (make-instruction "app_opted_in")
-     (make-instruction "app_local_get_ex")
-     (make-instruction "app_local_get")
-     (make-instruction "app_global_get_ex")
-     (make-instruction "app_global_get")
-     (make-instruction "app_local_put")
-     (make-instruction "app_global_put")
-     (make-instruction "app_local_del")
-     (make-instruction "app_global_del")
-     (make-instruction "asset_holding_get" asset-holding-field)
-     (make-instruction "asset_params_get" asset-params-field)
-     (make-instruction "app_params_get" app-field)
-     (make-instruction "log")))
+(define-sumtype Pseudoinstruction
+  i:Instruction
+  (int uint)
+  (byte bytes))
 
+(define-syntax instruction-parser
+  (syntax-parser
+    [_
+     (match-let ([(sumtype-info variants) (syntax-local-value #'Pseudoinstruction)])
+       (with-syntax ([(parser ...)
+                      (map
+                       (λ (variant)
+                         (match-let ([(record-info fields _ constructor _ _ _) (syntax-local-value variant)])
+                           (with-syntax ([name (symbol->string (syntax->datum variant))]
+                                         [constructor constructor]
+                                         [(field ...) (map
+                                                        (λ (field)
+                                                          (match field
+                                                            ['v #'uint8]
+                                                            ['i #'uint8]
+                                                            ['n #'uint8]
+                                                            ['uints #'(p* (>> whitespace* varuint))]
+                                                            ['bytess #'(p* (>> whitespace* pbytes))]
+                                                            ['group-index #'uint8]
+                                                            ['array-index #'uint8]
+                                                            ['offset #'guarded-label]
+                                                            ['start #'uint8]
+                                                            ['end #'uint8]
+                                                            ['length #'uint8]
+                                                            ['bytes #'pbytes]
+                                                            ['uint #'varuint]
+                                                            ['field
+                                                             (match (syntax->datum variant)
+                                                               [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas)
+                                                                #'transaction-field]
+                                                               ['global #'global-field]
+                                                               ['asset_holding_get #'asset-holding-field]
+                                                               ['asset_params_get #'asset-params-field]
+                                                               ['app_params_get #'app-params-field])]
+                                                            ))
+                                                        fields)])
+                             #'(make-instruction name constructor field ...))))
+                       variants)])
+         #'(∨ parser ...)))]))
 
 (define instruction
   (>> whitespace*
-      (∨ arithmetic-logic-cryptographic-instruction
-         byte-array-extract-instruction
-         byte-array-arithmetic-instruction
-         byte-array-logic-instruction
-         inner-transaction-instruction
-         value-loading-instruction
-         flow-control-instruction
-         state-access-instruction)))
+      (instruction-parser)))
 
 (define newline
   (>>= read-char
@@ -580,12 +321,14 @@ EOF
                       fail)))
              fail)))))
 
+(record label (ℓ))
+
 (define label-declaration
-  (>>= label
+  (>>= label-identifier
        (λ (ℓ)
          (>> space*
              (literal ":")
-             (unit `(label ,ℓ))))))
+             (unit (label ℓ))))))
 
 (define comment
   (>> (literal "//")
@@ -597,31 +340,8 @@ EOF
       (∨ newline end-of-input)
       (unit v)))
 
-#;
 (define line
-  ; we must distinguish between a comment on a blank line
-  ; and a comment following context because the division instruction
-  ; / is a prefix of the comment indicator //
-  (∨ (maybe-comment-after #f)
-     (>>= (report (∨ pragma
-                     instruction
-                     label-declaration)
-                  "expected pragma, label, or instruction at ~s")
-          maybe-comment-after)))
-
-#|
-
-  // this is a comment
-
-try getting a directive
-the pragma fails because we don't encounter #pragma
-we succeed with the instruction consuming "  /", we have left "/ this is a comment"
-but the failure continuation given to the success continuation will retry the line
-
-|#
-
-(define line
-  (>>= (p? (∨ pragma
+  (>>= (p? (∨ pragma-directive
               instruction
               label-declaration))
        (λ (v)
@@ -634,37 +354,24 @@ but the failure continuation given to the success continuation will retry the li
   (let loop ([i 0])
     (end-of-input input i (λ (_ i fk) (list))
                   (λ ()
-                    (line input i (λ (directive i fk)
-                                    (cons directive (loop i)))
+                    (line input i (λ (ds i fk)
+                                    (match ds
+                                      [(list directive)
+                                       (if directive
+                                         (cons directive (loop i))
+                                         (loop i))]
+                                      [_
+                                       (error 'parser "expected single result")]))
                           (λ ()
-                            (error 'parse "uncaught error with ~s" (snippet input i))))))
-    #;
-    (cond
-      [(end-of-input input i)
-       =>
-       (match-lambda
-         [(success [values (list #f)] [index i])
-          (list)]
-         [(failure [message msg])
-          (error 'parse msg)])]
-      [(line input i)
-       =>
-       (match-lambda
-         [(success [values (list directive)] [index i])
-          (println directive)
-          (if directive
-            (cons directive (loop i))
-            (loop i))]
-         [(failure [message msg])
-          (error 'parse msg)])]
-      [else
-       (error 'parse "uncaught error with ~s" (snippet input i))])))
+                            (error 'parse "uncaught error with ~s" (snippet input i))))))))
 
 (module+ main
   (require racket/port
            racket/pretty)
   (let ([input (port->string (current-input-port))])
     (let ([instructions (time (parse input))])
+      (pretty-print instructions)
+      #;
       (let ([initial-ph (make-placeholder #f)])
         (let ([phs (let loop ([instructions instructions]
                               [ph initial-ph]
