@@ -89,7 +89,7 @@
                                0
                                #f
                                (list)
-                               #f))
+                               'prefab))
            (define-syntax name
              (record-info '(field ...) #'type #'cons #'? #'ref #'set!))))]))
 

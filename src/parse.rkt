@@ -176,13 +176,14 @@
 
 ; bytes
 
-(require file/sha1)
+(require net/base64
+         file/sha1)
 
 (define pbytes
   (∨ (>> (literal "base64")
          whitespace+
          (>>= (p* (cc (^ "\r\n")))
-              (lift (λ (cs) (apply string cs)))))
+              (lift (λ (cs) (base64-decode (string->bytes/utf-8 (apply string cs)))))))
      (>> (literal "0x")
          (>>= (p* (cc hex-digit?)) (lift (λ (cs) (hex-string->bytes (apply string cs))))))))
 
@@ -199,13 +200,6 @@ byte[+ ]b32\((base32)\)
 byte[+ ](hex-number)
 byte[+ ](string)
 |#
-
-(record pragma (content))
-
-(define pragma-directive
-  (>> (literal "#pragma ")
-      (>>= (p* (cc (^ "\r\n")))
-           (lift (λ (cs) (pragma [content (apply string cs)]))))))
 
 (define (make-instruction name constructor . arguments)
   (>>= (make-symbol name)
@@ -308,6 +302,32 @@ byte[+ ](string)
   (>> whitespace*
       (instruction-parser)))
 
+(define pragma-directive
+  (>> (literal "#pragma ")
+      (>>= (p* (cc (^ "\r\n")))
+           (lift (λ (cs) (pragma [content (apply string cs)]))))))
+
+(define label-declaration
+  (>>= label-identifier
+       (λ (ℓ)
+         (>> space*
+             (literal ":")
+             (unit (label ℓ))))))
+
+(define directive
+  (∨ instruction
+     pragma-directive
+     label-declaration))
+
+(define-sumtype Directive
+  Pseudoinstruction
+  (pragma content)
+  (label ℓ))
+
+(define comment
+  (>> (literal "//")
+      (>>= (p* (cc (^ "\r\n"))) (lift (λ (cs) (apply string cs))))))
+
 (define newline
   (>>= read-char
        (λ (c)
@@ -321,29 +341,11 @@ byte[+ ](string)
                       fail)))
              fail)))))
 
-(record label (ℓ))
 
-(define label-declaration
-  (>>= label-identifier
-       (λ (ℓ)
-         (>> space*
-             (literal ":")
-             (unit (label ℓ))))))
 
-(define comment
-  (>> (literal "//")
-      (>>= (p* (cc (^ "\r\n"))) (lift (λ (cs) (apply string cs))))))
-
-(define (maybe-comment-after v)
-  (>> space*
-      (p? comment)
-      (∨ newline end-of-input)
-      (unit v)))
 
 (define line
-  (>>= (p? (∨ pragma-directive
-              instruction
-              label-declaration))
+  (>>= (p? directive)
        (λ (v)
          (>> whitespace*
              (p? comment)
@@ -371,7 +373,6 @@ byte[+ ](string)
   (let ([input (port->string (current-input-port))])
     (let ([instructions (time (parse input))])
       (pretty-print instructions)
-      #;
       (let ([initial-ph (make-placeholder #f)])
         (let ([phs (let loop ([instructions instructions]
                               [ph initial-ph]
@@ -382,13 +383,23 @@ byte[+ ](string)
                         phs]
                        [(cons instr instructions)
                         (let* ([next-ph (make-placeholder #f)]
-                               [phs (match instr
-                                      [`(label ,ℓ)
+                               [phs (sumtype-case Directive instr
+                                      [(label ℓ)
                                        (placeholder-set! ph next-ph)
                                        (hash-set phs ℓ next-ph)]
-                                      [_
+                                      [else
                                        (placeholder-set! ph (cons instr next-ph))
-                                       phs])])
+                                       phs])
+
+                                #;
+                                
+                                (match instr
+                                  [`(label ,ℓ)
+                                   (placeholder-set! ph next-ph)
+                                   (hash-set phs ℓ next-ph)]
+                                  [_
+                                   (placeholder-set! ph (cons instr next-ph))
+                                   phs])])
                           (loop instructions next-ph phs))]))])
           (let loop ([ph initial-ph])
             (match (placeholder-get ph)
@@ -397,6 +408,44 @@ byte[+ ](string)
               [(list)
                (void)]
               [(cons instr next-ph)
+               (sumtype-case Directive instr
+                 [(i:bnz [offset ℓ])
+                  (cond
+                    [(hash-ref phs ℓ #f)
+                     => (λ (is-ph)
+                          (placeholder-set! ph (cons (i:bnz [offset is-ph]) next-ph)))]
+                    [else
+                     (error 'parse "unknown label ~a" ℓ)])]
+                 [(i:bz [offset ℓ])
+                  (cond
+                    [(hash-ref phs ℓ #f)
+                     => (λ (is-ph)
+                          (placeholder-set! ph (cons (i:bz [offset is-ph]) next-ph)))]
+                    [else
+                     (error 'parse "unknown label ~a" ℓ)])]
+                 [(i:callsub [offset ℓ])
+                  (cond
+                    [(hash-ref phs ℓ #f)
+                     => (λ (is-ph)
+                          (placeholder-set! ph (cons (i:callsub [offset is-ph]) next-ph)))]
+                    [else
+                     (error 'parse "unknown label ~a" ℓ)])]
+                 [(i:b [offset ℓ])
+                  (cond
+                    [(hash-ref phs ℓ #f)
+                     => (λ (is-ph)
+                          (placeholder-set! ph is-ph))]
+                    [else
+                     (error 'parse "unknown label ~a" ℓ)])]
+                 [(i:err)
+                  (placeholder-set! ph (cons (i:err) (list)))]
+                 [(i:return)
+                  (placeholder-set! ph (cons (i:return) (list)))]
+                 [(i:retsub)
+                  (placeholder-set! ph (cons (i:retsub) (list)))]
+                 [else
+                  (void)])
+               #;
                (match instr
                  [(list (and code (or 'bnz 'bz 'callsub)) ℓ)
                   (cond
