@@ -367,105 +367,76 @@ byte[+ ](string)
                           (λ ()
                             (error 'parse "uncaught error with ~s" (snippet input i))))))))
 
+(define (resolve-control-flow directives)
+  (let ([initial-ph (make-placeholder #f)])
+    (let ([phs (let loop ([directives directives]
+                          [ph initial-ph]
+                          [phs (hasheq)])
+                 (match directives
+                   [(list)
+                    (placeholder-set! ph (list))
+                    phs]
+                   [(cons direc directives)
+                    (let* ([next-ph (make-placeholder #f)]
+                           [phs (sumtype-case Directive direc
+                                  [(label ℓ)
+                                   (placeholder-set! ph next-ph)
+                                   (hash-set phs ℓ next-ph)]
+                                  [else
+                                   (placeholder-set! ph (cons direc next-ph))
+                                   phs])])
+                      (loop directives next-ph phs))]))])
+      (let loop ([ph initial-ph])
+        (match (placeholder-get ph)
+          [(? placeholder? ph)
+           (loop ph)]
+          [(list)
+           (void)]
+          [(cons instr next-ph)
+           (sumtype-case Directive instr
+             [(i:bnz [offset ℓ])
+              (cond
+                [(hash-ref phs ℓ #f)
+                 => (λ (is-ph)
+                      (placeholder-set! ph (cons (i:bnz [offset is-ph]) next-ph)))]
+                [else
+                 (error 'parse "unknown label ~a" ℓ)])]
+             [(i:bz [offset ℓ])
+              (cond
+                [(hash-ref phs ℓ #f)
+                 => (λ (is-ph)
+                      (placeholder-set! ph (cons (i:bz [offset is-ph]) next-ph)))]
+                [else
+                 (error 'parse "unknown label ~a" ℓ)])]
+             [(i:callsub [offset ℓ])
+              (cond
+                [(hash-ref phs ℓ #f)
+                 => (λ (is-ph)
+                      (placeholder-set! ph (cons (i:callsub [offset is-ph]) next-ph)))]
+                [else
+                 (error 'parse "unknown label ~a" ℓ)])]
+             [(i:b [offset ℓ])
+              (cond
+                [(hash-ref phs ℓ #f)
+                 => (λ (is-ph)
+                      (placeholder-set! ph is-ph))]
+                [else
+                 (error 'parse "unknown label ~a" ℓ)])]
+             [(i:err)
+              (placeholder-set! ph (cons (i:err) (list)))]
+             [(i:return)
+              (placeholder-set! ph (cons (i:return) (list)))]
+             [(i:retsub)
+              (placeholder-set! ph (cons (i:retsub) (list)))]
+             [else
+              (void)])
+           (loop next-ph)]))
+      (make-reader-graph initial-ph))))
+
 (module+ main
   (require racket/port
            racket/pretty)
   (let ([input (port->string (current-input-port))])
-    (let ([instructions (time (parse input))])
-      (pretty-print instructions)
-      (let ([initial-ph (make-placeholder #f)])
-        (let ([phs (let loop ([instructions instructions]
-                              [ph initial-ph]
-                              [phs (hasheq)])
-                     (match instructions
-                       [(list)
-                        (placeholder-set! ph (list))
-                        phs]
-                       [(cons instr instructions)
-                        (let* ([next-ph (make-placeholder #f)]
-                               [phs (sumtype-case Directive instr
-                                      [(label ℓ)
-                                       (placeholder-set! ph next-ph)
-                                       (hash-set phs ℓ next-ph)]
-                                      [else
-                                       (placeholder-set! ph (cons instr next-ph))
-                                       phs])
-
-                                #;
-                                
-                                (match instr
-                                  [`(label ,ℓ)
-                                   (placeholder-set! ph next-ph)
-                                   (hash-set phs ℓ next-ph)]
-                                  [_
-                                   (placeholder-set! ph (cons instr next-ph))
-                                   phs])])
-                          (loop instructions next-ph phs))]))])
-          (let loop ([ph initial-ph])
-            (match (placeholder-get ph)
-              [(? placeholder? ph)
-               (loop ph)]
-              [(list)
-               (void)]
-              [(cons instr next-ph)
-               (sumtype-case Directive instr
-                 [(i:bnz [offset ℓ])
-                  (cond
-                    [(hash-ref phs ℓ #f)
-                     => (λ (is-ph)
-                          (placeholder-set! ph (cons (i:bnz [offset is-ph]) next-ph)))]
-                    [else
-                     (error 'parse "unknown label ~a" ℓ)])]
-                 [(i:bz [offset ℓ])
-                  (cond
-                    [(hash-ref phs ℓ #f)
-                     => (λ (is-ph)
-                          (placeholder-set! ph (cons (i:bz [offset is-ph]) next-ph)))]
-                    [else
-                     (error 'parse "unknown label ~a" ℓ)])]
-                 [(i:callsub [offset ℓ])
-                  (cond
-                    [(hash-ref phs ℓ #f)
-                     => (λ (is-ph)
-                          (placeholder-set! ph (cons (i:callsub [offset is-ph]) next-ph)))]
-                    [else
-                     (error 'parse "unknown label ~a" ℓ)])]
-                 [(i:b [offset ℓ])
-                  (cond
-                    [(hash-ref phs ℓ #f)
-                     => (λ (is-ph)
-                          (placeholder-set! ph is-ph))]
-                    [else
-                     (error 'parse "unknown label ~a" ℓ)])]
-                 [(i:err)
-                  (placeholder-set! ph (cons (i:err) (list)))]
-                 [(i:return)
-                  (placeholder-set! ph (cons (i:return) (list)))]
-                 [(i:retsub)
-                  (placeholder-set! ph (cons (i:retsub) (list)))]
-                 [else
-                  (void)])
-               #;
-               (match instr
-                 [(list (and code (or 'bnz 'bz 'callsub)) ℓ)
-                  (cond
-                    [(hash-ref phs ℓ #f)
-                     => (λ (is-ph)
-                          (placeholder-set! ph (cons (list code is-ph) next-ph)))]
-                    [else
-                     (error 'parse "unknown label ~a" ℓ)])]
-                 [`(b ,ℓ)
-                  (cond
-                    [(hash-ref phs ℓ #f)
-                     => (λ (is-ph)
-                          (placeholder-set! ph is-ph))]
-                    [else
-                     (error 'parse "unknown label ~a" ℓ)])]
-                 [(or `(err)
-                      `(return)
-                      `(retsub))
-                  (placeholder-set! ph (cons instr (list)))]
-                 [_
-                  (void)])
-               (loop next-ph)]))
-          (pretty-print (make-reader-graph initial-ph)))))))
+    (let ([directives (time (parse input))])
+      (pretty-print directives)
+      (pretty-print (resolve-control-flow directives)))))
