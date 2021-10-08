@@ -102,10 +102,30 @@
 (define whitespace+ (p+ (cc (λ (c) (or (eqv? c #\space) (eqv? c #\tab))))))
 
 (define (snippet input i)
-  (substring input i (min (string-length input) (+ i 64))))
+  (substring input i (min (string-length input) (+ i 24))))
 
-(define ((report p template) input i sk fk)
-  (p input i sk (λ () (error template (snippet input i)))))
+(define (report input i expected . expecteds)
+  (format #<<REPORT
+failure
+
+  at position ~a
+  encountered ~a
+  
+but expected~a
+
+~a
+REPORT
+          i
+          (let ([s (format "~s" (snippet input i))])
+            (substring s 1 (max 1 (sub1 (string-length s)))))
+          (if (null? expecteds) "" " one of")
+          (string-join (map (λ (expected) (string-append "  " expected "\n"))
+                            (cons expected expecteds))
+                       "")))
+
+(define ((guard p expected . expecteds) input i sk _)
+  (p input i sk (λ () (error 'parse (apply report input i expected expecteds)))))
+
 
 (define ((trace which p) input i sk fk)
   (displayln 'TRACE)
@@ -166,26 +186,48 @@
      octal-varuint
      decimal-varuint))
 
+(define guarded-varuint
+  (guard varuint "a nonnegative integer"))
+
 (define uint8
-  (report (>>= varuint
-               (λ (x)
-                 (if (< x 256)
-                   (unit x)
-                   fail)))
-          "expected a number which can fit in a byte; got ~s"))
+  (>>= varuint
+       (λ (x)
+         (if (< x 256)
+           (unit x)
+           fail))))
+
+(define guarded-uint8
+  (guard uint8 "a nonnegative integer which can fit in a byte"))
 
 ; bytes
 
 (require net/base64
          file/sha1)
 
+(define (base64-cs->bytes cs)
+  (base64-decode (string->bytes/utf-8 (apply string cs))))
+
 (define pbytes
-  (∨ (>> (literal "base64")
+  (∨ (>> (∨ (literal "base64")
+            (literal "b64"))
          whitespace+
-         (>>= (p* (cc (^ "\r\n")))
-              (lift (λ (cs) (base64-decode (string->bytes/utf-8 (apply string cs)))))))
+         (>>= (p* (cc (^ "\r\n"))) (lift base64-cs->bytes)))
+     (>> (∨ (literal "base64")
+            (literal "b64"))
+         (literal "(")
+         (>>= (p* (cc (^ ")")))
+              (λ (base64-cs)
+                (>> (literal ")")
+                    (unit (base64-cs->bytes base64-cs))))))
      (>> (literal "0x")
          (>>= (p* (cc hex-digit?)) (lift (λ (cs) (hex-string->bytes (apply string cs))))))))
+
+(define guarded-pbytes
+  (guard pbytes
+         "bytes as base64 ..."
+         "bytes as base32 ..."
+         "bytes as 0x..."
+         "bytes as a string"))
 
 #|
 bytes
@@ -202,19 +244,18 @@ byte[+ ](string)
 |#
 
 (define (make-instruction name constructor . arguments)
-  (>>= (make-symbol name)
-       (λ (id)
-         (>>= (let loop ([args arguments])
-                (match args
-                  [(list)
-                   (unit (list))]
-                  [(cons arg args)
-                   (>> whitespace+
-                       (>>= arg
-                            (λ (x)
-                              (>>= (loop args)
-                                   (λ (xs) (unit (cons x xs)))))))]))
-              (λ (xs) (unit (apply constructor xs)))))))
+  (>> (literal name)
+      (>>= (let loop ([args arguments])
+             (match args
+               [(list)
+                (unit (list))]
+               [(cons arg args)
+                (>> whitespace+
+                    (>>= arg
+                         (λ (x)
+                           (>>= (loop args)
+                                (λ (xs) (unit (cons x xs)))))))]))
+           (λ (xs) (unit (apply constructor xs))))))
 
 (require (for-syntax racket/base
                      racket/match
@@ -227,7 +268,8 @@ byte[+ ](string)
        [(sumtype-info variants)
         (with-syntax ([(varname ...) (map symbol->string (map syntax->datum variants))]
                       [(variant ...) variants])
-          #'(∨ (>> (literal varname) (unit (variant))) ...) )]
+          #'(guard (∨ (>> (literal varname) (unit (variant))) ...)
+                   varname ...) )]
        [_ (raise-syntax-error #f "not a sumtype" #'typename)])]))
 
 (define transaction-field
@@ -242,7 +284,8 @@ byte[+ ](string)
        (lift (λ (c cs) (string->symbol (apply string c cs))))))
 
 (define guarded-label
-  (report label-identifier "expected a label but got ~s"))
+  (guard label-identifier
+          "a label"))
 
 (define asset-holding-field
   (enumtype-parser i:AssetHoldingField))
@@ -271,19 +314,19 @@ byte[+ ](string)
                                          [(field ...) (map
                                                         (λ (field)
                                                           (match field
-                                                            ['v #'uint8]
-                                                            ['i #'uint8]
-                                                            ['n #'uint8]
+                                                            ['v #'guarded-uint8]
+                                                            ['i #'guarded-uint8]
+                                                            ['n #'guarded-uint8]
                                                             ['uints #'(p* (>> whitespace* varuint))]
                                                             ['bytess #'(p* (>> whitespace* pbytes))]
-                                                            ['group-index #'uint8]
-                                                            ['array-index #'uint8]
+                                                            ['group-index #'guarded-uint8]
+                                                            ['array-index #'guarded-uint8]
                                                             ['offset #'guarded-label]
-                                                            ['start #'uint8]
-                                                            ['end #'uint8]
-                                                            ['length #'uint8]
-                                                            ['bytes #'pbytes]
-                                                            ['uint #'varuint]
+                                                            ['start #'guarded-uint8]
+                                                            ['end #'guarded-uint8]
+                                                            ['length #'guarded-uint8]
+                                                            ['bytes #'guarded-pbytes]
+                                                            ['uint #'guarded-varuint]
                                                             ['field
                                                              (match (syntax->datum variant)
                                                                [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas)
@@ -341,9 +384,6 @@ byte[+ ](string)
                       fail)))
              fail)))))
 
-
-
-
 (define line
   (>>= (p? directive)
        (λ (v)
@@ -365,7 +405,10 @@ byte[+ ](string)
                                       [_
                                        (error 'parser "expected single result")]))
                           (λ ()
-                            (error 'parse "uncaught error with ~s" (snippet input i))))))))
+                            (error 'parse (report input i
+                                                  "an instruction"
+                                                  "a comment"
+                                                  "a pragma directive"))))))))
 
 (define (resolve-control-flow directives)
   (let ([initial-ph (make-placeholder #f)])
