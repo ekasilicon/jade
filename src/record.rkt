@@ -4,18 +4,17 @@
                      racket/match
                      syntax/parse))
 
-
 (begin-for-syntax
   (define ((make-field-index flds) fld-stx)
     (let ([fld (syntax->datum fld-stx)])
-      (cond
-        [(for/first ([i (in-naturals)]
-                     [fld₀ (in-list flds)]
-                     #:when (eq? fld₀ fld))
-           i)
-         => values]
-        [else
-         (raise-syntax-error #f "unknown field" fld-stx)])))
+          (cond
+            [(for/first ([i (in-naturals)]
+                         [fld₀ (in-list flds)]
+                         #:when (eq? fld₀ fld))
+               i)
+             => values]
+            [else
+             (raise-syntax-error #f "unknown field" fld-stx)])))
   (struct record-info (fields
                        type
                        constructor
@@ -95,53 +94,45 @@
 
 (provide record)
 
-(module+ main
-  (record test (foo bar baz))
-
-  (define x
-    (test [foo 10]
-          [bar 12]
-          [baz 11]))
-
-  (define z 1)
+(module+ test
+  (require rackunit)
   
-  (define y
-    (test [baz (begin (set! z 10) 1)]
-          [bar (begin (set! z 12) 2)]
-          [foo (begin (set! z 11) 3)]))
+  (record big (foo bar baz))
 
-  z
+  (let* ([z 1]
+         [y (big [baz (begin (set! z 10) 1)]
+                 [bar (begin (set! z 12) 2)]
+                 [foo (begin (set! z 11) 3)])])
+    (check-equal? z 11 "field reordering"))
+  
+  (check-equal? (match (let ([foo "this"]
+                             [bar "that"]
+                             [baz "what"])
+                         (big baz foo [bar "not that"])) 
+                  [(big baz foo bar [bar b])
+                   (list baz foo bar b)])
+                (list "what" "this" "not that" "not that"))
 
-  #;(test bar y)
-  #;(test baz y)
-  #;(test foo y)
-
+  (let ([x (big [foo 10]
+                [bar 12]
+                [baz 11])])
+    (check-equal? (match x
+                    [(big [foo z] [bar x])
+                     (list z x)])
+                  (list 10 12)))
+  
   #;
-  (? test? (and (app (λ (x) (ref x 0)) z)))
-
-  (define foo "this")
-  (define bar "that")
-  (define baz "what")
-
-  (match (test baz foo [bar "not that"])
-    [(test baz foo bar [bar b])
-     (list baz foo bar b)])
-  
-  (match x
-    [(test [foo z] [bar x])
-     (list z x)])
-
   (match x
     [(test foo [bar x])
      (list foo x)])
-
+  #;
   (match x
     [(test bar foo)
      (list foo bar)])
 
   #;(test foo)
   #;((test foo) x) 
-
+  #;
   (match x
     [(test [foo _] [bar b])
      b]))

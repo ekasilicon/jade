@@ -134,25 +134,29 @@
 ; 1. allow the else form of a sumtype-case-lambda to name the argument
 ; 2. make sumtype user-extensible? define-sumtype-clause?
 
-(module+ test
+(module+ main
+  (require rackunit)
+  
   (define-sumtype Test
     (a)
     (b)
     (c))
 
-  (sumtype-case Test (a)
-    [(a) 10]
-    [else 20])
+  (check-equal? (sumtype-case Test (a)
+                  [(a) 10]
+                  [else 20])
+                10)
 
   (define-sumtype Test2
     Test
     (d))
 
-  (sumtype-case Test2 (d)
-    [(d) 20]
-    [(a) 12]
-    [(b) 10]
-    [(c) 9])
+  (check-equal? (sumtype-case Test2 (d)
+                  [(d) 20]
+                  [(a) 12]
+                  [(b) 10]
+                  [(c) 9])
+                20)
 
   (define-sumtype Test4
     (e)
@@ -168,9 +172,15 @@
     d
     e)
 
-  (sumtype-case Test5 (a)
-    [(a) 10]
-    [(b) 11]
-    [(d) 12]
-    [(e) 143]))
+  (check-equal? (sumtype-case Test5 (a)
+                  [(a) 10]
+                  [(b) 11]
+                  [(d) 12]
+                  [(e) 143])
+                10)
+
+  (check-exn #rx"not a variant"
+             (λ ()
+               (sumtype-case Test (e)
+                 [else 42]))))
 

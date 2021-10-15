@@ -1,5 +1,6 @@
 #lang racket/base
-(require racket/match
+(require (prefix-in r: (only-in racket/base <=))
+         racket/match
          "sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
@@ -396,6 +397,7 @@
   (itxn_submit)
   (itxn field)
   (itxna field array-index)
+  (itxn_next)
   (txnas field)
   (gtxnas group-index field)
   (gtxnsas field)
@@ -403,6 +405,14 @@
 
 (define instruction-name
   (sumtype-name Instruction))
+
+(define-match-expander range
+  (syntax-rules ()
+    [(_ id lb ub)
+     (and id (? (λ (oc) (and (r:<= lb oc) (r:<= oc ub)))))]))
+
+(define (unused-opcode opcode)
+  (error 'read-instruction "opcode ~a is unused" (number->string opcode 16)))
 
 ; ReadByte => m Instruction
 (define (read-instruction rb)
@@ -435,7 +445,13 @@
          [#x16 (unit (itob))]
          [#x17 (unit (btoi))]
          [#x18 (unit (%))]
+         [#x19 (unit (\|))]
          [#x1a (unit (&))]
+         [#x1b (unit (^))]
+         [#x1c (unit (~))]
+         [#x1d (unit (mulw))]
+         [#x1e (unit (addw))]
+         [#x1f (unit (divmodw))]
          [#x20 (>>= (read-intcblock rb) (λ (ns) (unit (intcblock [uints ns]))))]
          [#x21 (>>= (read-uint8 rb) (λ (i) (unit (intc i))))]
          [#x22 (unit (intc_0))]
@@ -448,6 +464,11 @@
          [#x29 (unit (bytec_1))]
          [#x2a (unit (bytec_2))]
          [#x2b (unit (bytec_3))]
+         [#x2c (>>= (read-uint8 rb) (λ (n) (unit (arg n))))]
+         [#x2d (unit (arg_0))]
+         [#x2e (unit (arg_1))]
+         [#x2f (unit (arg_2))]
+         [#x30 (unit (arg_3))]
          [#x31 (>>= (read-transaction-field rb) (λ (f) (unit (txn [field f]))))]
          [#x32 (>>= (read-global-field rb) (λ (f) (unit (global [field f]))))]
          [#x33 (>>= (read-uint8 rb) (λ (gi) (>>= (read-transaction-field rb) (λ (f) (unit (gtxn [group-index gi] [field f]))))))]
@@ -455,13 +476,20 @@
          [#x35 (>>= (read-uint8 rb) (λ (i) (unit (store i))))]
          [#x36 (>>= (read-transaction-field rb) (λ (f) (>>= (read-uint8 rb) (λ (ai) (unit (txna [field f] [array-index ai]))))))]
          [#x37 (>>= (read-uint8 rb) (λ (gi) (>>= (read-transaction-field rb) (λ (f) (>>= (read-uint8 rb) (λ (ai) (unit (gtxna [group-index gi] [field f] [array-index ai]))))))))]
-         [#x38 (>>= (read-transaction-field rb)  (λ (f) (unit (gtxns [field f]))))]
+         [#x38 (>>= (read-transaction-field rb) (λ (f) (unit (gtxns [field f]))))]
+         [#x39 (>>= (read-transaction-field rb) (λ (f) (>>= (read-uint8 rb) (λ (ai) (unit (gtxnsa [field f] [array-index ai]))))))]
+         [#x3a (>>= (read-uint8 rb) (λ (gi) (>>= (read-uint8 rb) (λ (i) (unit (gload [group-index gi] i))))))]
+         [#x3b (>>= (read-uint8 rb) (λ (i) (unit (gloads i))))]
+         [#x3c (>>= (read-uint8 rb) (λ (gi) (unit (gaid [group-index gi]))))]
+         [#x3d (unit (gaids))]
+         [#x3e (unit (loads))]
+         [#x3f (unit (stores))]
          [#x40 (>>= (read-offset rb) (λ (offset) (unit (bnz offset))))]
          [#x41 (>>= (read-offset rb) (λ (offset) (unit (bz offset))))]
          [#x42 (>>= (read-offset rb) (λ (offset) (unit (b offset))))]
          [#x43 (unit (return))]
          [#x44 (unit (assert))]
-         ; #x45-#x47 unused
+         [(range opcode #x45 #x47) (unused-opcode opcode)]
          [#x48 (unit (pop))]
          [#x49 (unit (dup))]
          [#x4a (unit (dup2))]
@@ -473,19 +501,56 @@
          [#x50 (unit (concat))]
          [#x51 (>>= (read-uint8 rb) (λ (s) (>>= (read-uint8 rb) (λ (e) (unit (substring [start s] [end e]))))))]
          [#x52 (unit (substring3))]
+         [#x53 (unit (getbit))]
+         [#x54 (unit (setbit))]
          [#x55 (unit (getbyte))]
          [#x56 (unit (setbyte))]
+         [#x57 (>>= (read-uint8 rb) (λ (s) (>>= (read-uint8 rb) (λ (l) (unit (extract [start s] [length l]))))))]
+         [#x58 (unit (extract3))]
+         [#x59 (unit (extract_uint16))]
+         [#x5a (unit (extract_uint32))]
+         [#x5b (unit (extract_uint64))]
+         [(range opcode #x5c #x5f) (unused-opcode opcode)]
+         [#x60 (unit (balance))]
+         [#x61 (unit (app_opted_in))]
          [#x62 (unit (app_local_get))]
+         [#x63 (unit (app_local_get_ex))]
          [#x64 (unit (app_global_get))]
          [#x65 (unit (app_global_get_ex))]
          [#x66 (unit (app_local_put))]
          [#x67 (unit (app_global_put))]
          [#x68 (unit (app_local_del))]
          [#x69 (unit (app_global_del))]
+         [(range opcode #x6a #x6f) (unused-opcode opcode)]
+         [#x70 (>>= (read-asset-holding-field rb) (λ (f) (unit (asset_holding_get [field f]))))]
+         [#x71 (>>= (read-asset-params-field rb) (λ (f) (unit (asset_params_get [field f]))))]
+         [#x72 (>>= (read-app-params-field rb) (λ (f) (unit (asset_params_get [field f]))))]
+         [(range opcode #x73 #x77) (unused-opcode opcode)]
+         [#x78 (unit (min_balance))]
+         [(range opcode #x79 #x7f) (unused-opcode opcode)]
          [#x80 (>>= (read-bytes rb) (λ (bs) (unit (pushbytes [bytes bs]))))]
          [#x81 (>>= (read-varuint rb) (λ (n) (unit (pushint [uint n]))))]
+         [(range opcode #x82 #x87) (unused-opcode opcode)]
          [#x88 (>>= (read-offset rb) (λ (offset) (unit (callsub offset))))]
          [#x89 (unit (retsub))]
+         [(range opcode #x8a #x8f) (unused-opcode opcode)]
+         [#x90 (unit (shl))]
+         [#x91 (unit (shr))]
+         [#x92 (unit (sqrt))]
+         [#x93 (unit (bitlen))]
+         [#x94 (unit (exp))]
+         [#x95 (unit (expw))]
+         [(range opcode #x96 #x9f) (unused-opcode opcode)]
+         [#xa0 (unit (b+))]
+         [#xa1 (unit (b-))]
+         [#xa2 (unit (b/))]
+         [#xa3 (unit (b*))]
+         [#xa4 (unit (b<))]
+         [#xa5 (unit (b>))]
+         [#xa6 (unit (b<=))]
+         [#xa7 (unit (b>=))]
+         [#xa8 (unit (b==))]
+         [#xa9 (unit (b!=))]
          [#xaa (unit (b%))]
          [#xab (unit (b\|))]
          [#xac (unit (b&))]
@@ -498,8 +563,13 @@
          [#xb3 (unit (itxn_submit))]
          [#xb4 (>>= (read-transaction-field rb) (λ (f) (unit (itxn [field f]))))]
          [#xb5 (>>= (read-transaction-field rb) (λ (f) (>>= (read-uint8 rb) (λ (ai) (unit (itxna [field f] [array-index ai]))))))]
-         ; #xb6-#xbf unused
-         [#xc0 (>>= (read-transaction-field rb) (λ (f) (unit (txnas [field f]))))])))
+         [#xb6 (unit (itxn_next))]
+         [(range opcode #xb7 #xbf) (unused-opcode opcode)]
+         [#xc0 (>>= (read-transaction-field rb) (λ (f) (unit (txnas [field f]))))]
+         [#xc1 (>>= (read-uint8 rb) (λ (i) (>>= (read-transaction-field rb) (λ (f) (unit (gtxnas [group-index i] [field f]))))))]
+         [#xc2 (>>= (read-transaction-field rb) (λ (f) (unit (gtxnsas [field f]))))]
+         [#xc3 (unit (args))]
+         [(range opcode #xc4 #xff) (unused-opcode opcode)])))
 
 ; instruction-logic-signature-version : Instruction -> positive-integer?
 (define instruction-logic-signature-version
@@ -522,7 +592,9 @@
     [(ecdsa_verify ecdsa_pk_decompress ecdsa_pk_recover loads stores cover uncover
       extract extract3 extract_uint16 extract_uint32 extract_uint64 app_params_get
       log itxn_begin itxn_field itxn_submit itxn itxna txnas gtxnas gtxnsas args)
-     5]))
+     5]
+    [(itxn_next)
+     6]))
 
 (provide (sumtype-out Instruction)
          instruction-name

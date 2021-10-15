@@ -3,9 +3,10 @@
          racket/set
          racket/port
          "record.rkt"
+         "sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
-         "instruction.rkt")
+         (prefix-in i: "instruction.rkt"))
 
 (record failure (message))
 (record success (values state index))
@@ -33,7 +34,7 @@
   (failure [message (apply format template args)]))
 
 (define Disassemble-ReadByte
-  (ReadByte [Monad (Monad unit >>= >>)]
+  (ReadByte [monad (Monad unit >>= >>)]
             [read-byte (λ (bs s i)
                          (if (= (bytes-length bs) i)
                            #f
@@ -42,9 +43,6 @@
                                     [index (add1 i)])))]))
 
 (define rb Disassemble-ReadByte)
-
-(define ((lift f) . xs)
-  (call-with-values (λ () (apply f xs)) unit))
 
 (define (stream-end bs s i)
   (if (= (bytes-length bs) i)
@@ -60,30 +58,25 @@
 (define ((mupdate k f d) bs s i)
   (success [values (list)] [state (hash-update s k f d)] [index i]))
 
-(define (push-destination n)
-  (mupdate 'destinations (λ (ns) (cons n ns)) (list)))
-
-(define destination
-  (>>= (read-int16 rb) 
-       (λ (offset)
-         (>>= position
-              (λ (i)
-                (let ([dst (+ i offset)])
-                  (>> (push-destination dst)
-                      (unit dst))))))))
-
 (define disassemble-instruction
-  (>>= (read-instruction rb)
-       (match-lambda
-         [(list (and code (or 'b 'bz 'bnz 'callsub))
-                offset)
-          (>>= position
-               (λ (i)
-                 (let ([dst (+ i offset)])
-                   (>> (push-destination dst)
-                       (unit (list code dst))))))]
-         [instr
-          (unit instr)])))
+  (>>= (i:read-instruction rb)
+       (λ (instr)
+         (define (offset→destination offset)
+           (>>= position (λ (pc) (unit (+ pc offset)))))
+         (sumtype-case i:Instruction instr
+           [(i:b offset)
+            (>>= (offset→destination offset)
+                 (λ (dst) (unit (i:b [offset dst]))))]
+           [(i:bz offset)
+            (>>= (offset→destination offset)
+                 (λ (dst) (unit (i:bz [offset dst]))))]
+           [(i:bnz offset)
+            (>>= (offset→destination offset)
+                 (λ (dst) (unit (i:bnz [offset dst]))))]
+           [(i:callsub offset)
+            (>>= (offset→destination offset)
+                 (λ (dst) (unit (i:callsub [offset dst]))))]
+           [else (unit instr)]))))
 
 (define disassemble-instruction-stream
   (>>= position
@@ -118,8 +111,13 @@
 (define (disassemble-port ip)
   (disassemble-bytes (port->bytes ip)))
 
+(define-sumtype Directive
+  i:Instruction
+  (pragma content)
+  (label ℓ))
+
 (define (state→assembly state)
-  (cons `(pragma ,(format "version ~a" (hash-ref state 'logic-sig-version)))
+  (cons (pragma [content (format "version ~a" (hash-ref state 'logic-sig-version))])
         (let ([instrs (hash-ref state 'instructions)]
               [start-i (hash-ref state 'initial)])
           (define (instr-ref i)
@@ -134,16 +132,21 @@
                            [`(done)
                             dsts]
                            [`(succ ,instr ,next-i)
+                            (define (add-destination dst)
+                              (if (hash-has-key? instrs dst)
+                                (set-add dsts dst)
+                                (error 'disassemble "branch to byte offset ~a not on instruction boundary" dst)))
                             (loop next-i
-                                  (match instr
-                                    [(or `(b ,dst)
-                                         `(bz ,dst)
-                                         `(bnz ,dst)
-                                         `(callsub ,dst))
-                                     (if (hash-has-key? instrs dst)
-                                       (set-add dsts dst)
-                                       (error 'disassemble "branch to byte index ~a not on instruction boundary" dst))]
-                                    [_
+                                  (sumtype-case i:Instruction instr
+                                    [(i:b [offset dst])
+                                     (add-destination dst)]
+                                    [(i:bz [offset dst])
+                                     (add-destination dst)]
+                                    [(i:bnz [offset dst])
+                                     (add-destination dst)]
+                                    [(i:callsub [offset dst])
+                                     (add-destination dst)]
+                                    [else
                                      dsts]))]))]
                  [dsts (for/hash ([dst (in-list (sort (set->list dsts) <))]
                                   [i (in-naturals)])
@@ -153,15 +156,21 @@
                               [`(done)
                                (list)]
                               [`(succ ,instr ,next-i)
-                               (cons (match instr
-                                       [(list (and code (or 'b 'bz 'bnz 'callsub)) dst)
-                                        (list code (hash-ref dsts dst))]
-                                       [_
+                               (cons (sumtype-case i:Instruction instr
+                                       [(i:b [offset dst])
+                                        (i:b [offset (hash-ref dsts dst)])]
+                                       [(i:bz [offset dst])
+                                        (i:bz [offset (hash-ref dsts dst)])]
+                                       [(i:bnz [offset dst])
+                                        (i:bnz [offset (hash-ref dsts dst)])]
+                                       [(i:callsub [offset dst])
+                                        (i:callsub [offset (hash-ref dsts dst)])]
+                                       [else
                                         instr])
                                      (loop next-i))])])
                 (cond
                   [(hash-ref dsts i #f)
-                   => (λ (ℓ) (cons `(label ,ℓ) instrs))]
+                   => (λ (ℓ) (cons (label ℓ) instrs))]
                   [else instrs])))))))
 
 (define (state→AST state)
@@ -195,28 +204,35 @@
       (let loop ([i start-i])
         (match (hash-ref instructions i)
           [`(succ ,instr ,next-i)
-           (match instr
-             [(list (and code (or 'bnz 'bz 'callsub))
-                    pc)
-              (cond
-                [(hash-ref phs pc #f)
-                 => (λ (ph)
-                      (placeholder-set! (hash-ref phs i)
-                                        (cons (list code ph)
-                                              (hash-ref phs next-i))))]
-                [else
-                 (error 'disassemble "branch to byte offset ~a not on instruction boundary" pc)])]
-             [(list 'b pc)
+           (define (resolve dst make)
+             (cond
+               [(hash-ref phs dst #f)
+                => (λ (ph)
+                     (placeholder-set! (hash-ref phs i) (cons (make ph) (hash-ref phs next-i))))]
+               [else
+                (error 'disassemble "branch to byte offset ~a not on instruction boundary" dst)]))
+           (define (terminal instr)
+             (placeholder-set! (hash-ref phs i)
+                               (cons instr (list))))
+           (sumtype-case i:Instruction instr
+             [(i:bz [offset dst])
+              (resolve dst (λ (ph) (i:bz [offset ph])))]
+             [(i:bnz [offset dst])
+              (resolve dst (λ (ph) (i:bnz [offset ph])))]
+             [(i:callsub [offset dst])
+              (resolve dst (λ (ph) (i:callsub [offset ph])))]
+             [(i:b [offset dst])
               ; don't set it to the contents of the destination placeholder
               ; because those might be changed by this loop
               (placeholder-set! (hash-ref phs i)
-                                (hash-ref phs pc))]
-             [(or `(err)
-                  `(retsub)
-                  `(return))
-              (placeholder-set! (hash-ref phs i)
-                                (cons instr (list)))]
-             [_
+                                (list (i:b [offset (hash-ref phs dst)])))]
+             [(i:err)
+              (terminal instr)]
+             [(i:retsub)
+              (terminal instr)]
+             [(i:return)
+              (terminal instr)]
+             [else
               (void)])
            (loop next-i)]
           [`(done)
