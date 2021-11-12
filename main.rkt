@@ -5,7 +5,8 @@
          #;
          "src/incremental.rkt")
 
-(let ([constants (hash)])
+(let ([constants (hash)]
+      [mode #f])
   (command-line
    #:program "jade"
    #:argv (match (current-command-line-arguments)
@@ -15,26 +16,6 @@
    #:usage-help
    ""
    "\010\010jade analyzes the TEAL program bytecode supplied to standard input."
-   ""
-   "\010\010<bytecode-format> is one of"
-   ""
-   "raw-binary"
-   "   Tell jade to expect raw bytecode binary on standard input."
-   "garnished-json"
-   "   Tell jade to expect a JSON-encoded bytecode package which"
-   "   includes both Approval and ClearState programs and useful"
-   "   metadata."
-   "   jade uses this additional information to perform a better"
-   "   analysis and produce better diagnostics."
-   "   The Application endpoint of the Algorand API v2 produces"
-   "   acceptable packages."
-   "   This API is implemented by the AlgoExplorer at"
-   ""
-   "     https://algoexplorer.io"
-   ""
-   "   with documentation at"
-   ""
-   "      https://algoexplorer.io/api-dev/v2"
    #:multi
    [("--symbolic-bytes" "-b") symbol bytes-constant
     ("Treats the use of <bytes-constant> in a TEAL program"
@@ -88,37 +69,59 @@
                  (exit 255))])]
         [else
          (set! constants (hash-set constants parsed-uint-constant (cons symbol uint-constant)))]))]
-   #:args (bytecode-format)
-   (match bytecode-format
-     ["raw-binary"
-      (let ([bs (port->bytes (current-input-port))])
-        (if (bytes=? bs #"")
-          (begin
-            (displayln "Expected raw binary on standard input.")
-            (exit 255))
-          (void)
-          #;
-          (analyze/raw-binary bs (make-immutable-hasheq (hash->list constants)))))]
-     ["garnished-json"
-      (let ([bs (port->bytes (current-input-port))])
-        (if (bytes=? bs #"")
-          (begin
-            (displayln "Expected JSON package on standard input.")
-            (exit 255))
-          (void)
-          #;
-          (analyze/json-package bs (make-immutable-hasheq (hash->list constants)))))]
-     [_
-      (printf #<<MESSAGE
-Expected <bytecode-format> of 'raw-binary' or 'garnished-json'
-but got '~a'. The command
-
-  jade --help
-
-offers more information about the acceptable options.
+   #:once-any
+   [("--json-package" "-j")
+    ("Tell jade to expect a JSON-encoded bytecode package which"
+     "includes both Approval and ClearState programs and useful"
+     "metadata."
+     "jade uses this additional information to perform a better"
+     "analysis and produce better diagnostics."
+     "The Application endpoint of the Algorand API v2 produces"
+     "acceptable packages."
+     "This API is implemented by the AlgoExplorer at"
+     ""
+     "  https://algoexplorer.io"
+     ""
+     "with documentation at"
+     ""
+     "   https://algoexplorer.io/api-dev/v2")
+    (set! mode (cons 'json-package #f))]
+   [("--raw-binary" "-j") program-type
+    ("Tell jade to expect raw bytecode binary on standard input"
+     "with <program-type> ApprovalProgram or ClearStateProgram.")
+    (match program-type
+      ["ApprovalProgram"
+       (set! mode (cons 'raw-binary 'ApprovalProgram))]
+      ["ClearStateProgram"
+       (set! mode (cons 'raw-binary 'ClearStateProgram))]
+      [_
+       (printf #<<MESSAGE
+Received ~a as <program-type> but expected either ApprovalProgram
+or ClearStateProgram.
 
 MESSAGE
-              bytecode-format)])))
+               program-type)
+       (exit 255)])]
+   #:args ()
+   (define (standard-input-bytes expected)
+     (let ([bs (port->bytes (current-input-port))])
+       (if (bytes=? bs #"")
+         (begin
+           (printf "Expected ~a on standard input.\n" expected)
+           (exit 255))
+         bs)))
+   (match mode
+     [(cons 'raw-binary program-type)
+      (void)
+      #;
+      (analyze/raw-binary program-type
+                          (standard-input-bytes "raw binary")
+                          constants)]
+     [(cons 'json-package #f)
+      (void)
+      #;
+      (analyze/json-package (standard-input-bytes "JSON package")
+                            constants)])))
 
 ; put this handler after the command-line parsing because
 ; `command-line` exceptions are caught by it otherwise.
