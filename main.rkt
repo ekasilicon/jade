@@ -2,6 +2,7 @@
 (require racket/match
          racket/cmdline
          racket/port
+         "src/parse.rkt"
          #;
          "src/incremental.rkt")
 
@@ -15,7 +16,7 @@
             [ccla ccla])
    #:usage-help
    ""
-   "\010\010jade analyzes the TEAL program bytecode supplied to standard input."
+   "jade analyzes the TEAL program bytecode supplied to standard input."
    #:multi
    [("--symbolic-bytes" "-b") symbol bytes-constant
     ("Treats the use of <bytes-constant> in a TEAL program"
@@ -30,7 +31,7 @@
      "which is representative of all programs which"
      "complete the template.")
     (let ([symbol (string->symbol symbol)]
-          [parsed-bytes-constant (string->bytes/utf-8 bytes-constant)])
+          [parsed-bytes-constant (parse-bytes bytes-constant)])
       (cond
         [(hash-ref constants parsed-bytes-constant #f)
          => (match-lambda
@@ -55,7 +56,7 @@
      "which is representative of all programs which"
      "complete the template.")
     (let ([symbol (string->symbol symbol)]
-          [parsed-uint-constant (string->number uint-constant)])
+          [parsed-uint-constant (parse-varuint uint-constant)])
       (cond
         [(hash-ref constants parsed-uint-constant #f)
          => (match-lambda
@@ -102,6 +103,9 @@ or ClearStateProgram.
 MESSAGE
                program-type)
        (exit 255)])]
+   #:usage-help
+   "It expects either the --json-package flag or the --raw-binary flag,"
+   "each documented below."
    #:args ()
    (define (standard-input-bytes expected)
      (let ([bs (port->bytes (current-input-port))])
@@ -121,7 +125,10 @@ MESSAGE
       (void)
       #;
       (analyze/json-package (standard-input-bytes "JSON package")
-                            constants)])))
+                            constants)]
+     [#f
+      (displayln "Expected either --raw-binary or --json-package flag.")
+      (exit 255)])))
 
 ; put this handler after the command-line parsing because
 ; `command-line` exceptions are caught by it otherwise.
