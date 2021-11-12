@@ -1,8 +1,11 @@
 #lang racket/base
 (require racket/match
-         racket/cmdline)
+         racket/cmdline
+         racket/port
+         #;
+         "src/incremental.rkt")
 
-(let ([constants (make-hasheq)])
+(let ([constants (hash)])
   (command-line
    #:program "jade"
    #:argv (match (current-command-line-arguments)
@@ -48,23 +51,18 @@
     (let ([symbol (string->symbol symbol)]
           [parsed-bytes-constant (string->bytes/utf-8 bytes-constant)])
       (cond
-        [(hash-ref constants symbol #f)
+        [(hash-ref constants parsed-bytes-constant #f)
          => (match-lambda
-              [`(bytes ,parsed-bytes-constant₀ ,bytes-constant₀)
-               (unless (bytes=? parsed-bytes-constant₀ parsed-bytes-constant)
-                 (printf "Cannot associate symbol <~a> with bytes constants ~a and ~a.\n"
-                         symbol
+              [(cons symbol₀ bytes-constant₀)
+               (unless (eq? symbol₀ symbol)
+                 (printf "Cannot associate equivalent bytes literals ~a and ~a with distinct symbols <~a> and <~a>.\n"
                          bytes-constant₀
-                         bytes-constant)
-                 (exit 255))]
-              [`(uint ,_ ,uint-constant)
-               (printf "Cannot associate symbol <~a> with uint constant ~a and bytes constant ~a.\n"
-                       symbol
-                       uint-constant
-                       bytes-constant)
-               (exit 255)])]
+                         bytes-constant
+                         symbol₀
+                         symbol)
+                 (exit 255))])]
         [else
-         (hash-set! constants symbol `(bytes ,parsed-bytes-constant ,bytes-constant))]))]
+         (set! constants (hash-set constants parsed-bytes-constant (cons symbol bytes-constant)))]))]
    [("--symbolic-uint" "-u") symbol uint-constant
     ("Treats the use of <uint-constant> in a TEAL program"
      "as the symbolic value <symbol>."
@@ -78,29 +76,38 @@
     (let ([symbol (string->symbol symbol)]
           [parsed-uint-constant (string->number uint-constant)])
       (cond
-        [(hash-ref constants symbol #f)
+        [(hash-ref constants parsed-uint-constant #f)
          => (match-lambda
-              [`(uint ,parsed-uint-constant₀ ,uint-constant₀)
-               (unless (= parsed-uint-constant₀ parsed-uint-constant)
-                 (printf "Cannot associate symbol <~a> with uint constants ~a and ~a.\n"
-                         symbol
+              [(cons symbol₀ uint-constant₀)
+               (unless (eq? symbol₀ symbol)
+                 (printf "Cannot associate equivalent uint literals ~a and ~a with distinct symbols <~a> and <~a>.\n"
                          uint-constant₀
-                         uint-constant)
-                 (exit 255))]
-              [`(bytes ,_ ,bytes-constant)
-               (printf "Cannot associate symbol <~a> with bytes constant ~a and uint constant ~a.\n"
-                       symbol
-                       bytes-constant
-                       uint-constant)
-               (exit 255)])]
+                         uint-constant
+                         symbol₀
+                         symbol)
+                 (exit 255))])]
         [else
-         (hash-set! constants symbol `(uint ,parsed-uint-constant ,uint-constant))]))]
+         (set! constants (hash-set constants parsed-uint-constant (cons symbol uint-constant)))]))]
    #:args (bytecode-format)
    (match bytecode-format
      ["raw-binary"
-      (void)]
+      (let ([bs (port->bytes (current-input-port))])
+        (if (bytes=? bs #"")
+          (begin
+            (displayln "Expected raw binary on standard input.")
+            (exit 255))
+          (void)
+          #;
+          (analyze/raw-binary bs (make-immutable-hasheq (hash->list constants)))))]
      ["garnished-json"
-      (void)]
+      (let ([bs (port->bytes (current-input-port))])
+        (if (bytes=? bs #"")
+          (begin
+            (displayln "Expected JSON package on standard input.")
+            (exit 255))
+          (void)
+          #;
+          (analyze/json-package bs (make-immutable-hasheq (hash->list constants)))))]
      [_
       (printf #<<MESSAGE
 Expected <bytecode-format> of 'raw-binary' or 'garnished-json'
