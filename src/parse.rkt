@@ -281,7 +281,7 @@ MESSAGE
 
 (define ((negate f) x) (not (f x)))
 
-(define hex-literal
+(define bytes-hex-literal
   (>> (literal "0x")
       (>>= (let loop ()
              (∨ (>> (∨ end-of-input (cc (negate hex-digit?)))
@@ -291,24 +291,24 @@ MESSAGE
                      (λ (b) (>>= (loop) (λ (bs) (unit (cons b bs))))))))
            (λ (bs) (unit (apply bytes bs))))))
 
-(define string-literal
+(define bytes-string-literal
   (>> (c #\")
       (>>= (let loop ()
              (>>= read-char
                   (match-lambda
                     [#\" (unit (list))]
-                    [#\\ (>>= (>>= read-char
-                                   (match-lambda
-                                     [#\n (unit (char->integer #\newline))]
-                                     [#\r (unit (char->integer #\return))]
-                                     [#\t (unit (char->integer #\tab))]
-                                     [#\\ (unit (char->integer #\\))]
-                                     [#\" (unit (char->integer #\"))]
-                                     [#\0 (>>= (read-chars 3 octal-digit?)
-                                               (lift (make-digits→numeral 8)))]
-                                     [#\x (>>= (read-chars 2 hex-digit?)
-                                               (lift (make-digits→numeral 16)))]
-                                     [_ fail]))
+                    [#\\ (>>= (∨ (>>= read-char
+                                      (match-lambda
+                                        [#\n (unit (char->integer #\newline))]
+                                        [#\r (unit (char->integer #\return))]
+                                        [#\t (unit (char->integer #\tab))]
+                                        [#\\ (unit (char->integer #\\))]
+                                        [#\" (unit (char->integer #\"))]
+                                        [#\x (>>= (read-chars 2 hex-digit?)
+                                                  (lift hex-digits→numeral))]
+                                        [_ fail]))
+                                 (>>= (read-chars 3 octal-digit?)
+                                      (lift octal-digits→numeral)))
                               (λ (b) (>>= (loop) (λ (bs) (unit (cons b bs))))))]
                     [c (let ([b (char->integer c)])
                          (if (< b 256)
@@ -316,54 +316,49 @@ MESSAGE
                            fail))])))
            (λ (bs) (unit (apply bytes bs))))))
 
+(define base32-bytes (>>= (p* (cc base32-digit?)) (lift base32-cs->bytes)))
+(define base64-bytes (>>= (p* (cc base64-digit?)) (lift base64-cs->bytes)))
+
 (define pbytes
   (∨ (>> (∨ (literal "base64")
             (literal "b64"))
          whitespace+
-         (>>= (p* (cc base64-digit?)) (lift base64-cs->bytes)))
+         base64-bytes)
      (>> (∨ (literal "base64")
             (literal "b64"))
          (literal "(")
-         (>>= (p* (cc base64-digit?))
-              (λ (base64-cs)
+         (>>= base64-bytes
+              (λ (bs)
                 (>> (literal ")")
-                    (unit (base64-cs->bytes base64-cs))))))
+                    (unit bs)))))
      (>> (∨ (literal "base32")
             (literal "b32"))
          whitespace+
-         (>>= (p* (cc base32-digit?)) (lift base32-cs->bytes)))
+         base32-bytes)
      (>> (∨ (literal "base32")
             (literal "b32"))
          (literal "(")
-         (>>= (p* (cc base32-digit?))
-              (λ (base32-cs)
+         (>>= base32-bytes
+              (λ (bs)
                 (>> (literal ")")
-                    (unit (base32-cs->bytes base32-cs))))))
-     hex-literal
-     string-literal))
+                    (unit bs)))))
+     bytes-hex-literal
+     bytes-string-literal))
 
 (provide parse-bytes)
 
 (define guarded-pbytes
   (guard pbytes
-         "bytes as base64 ..."
-         "bytes as base32 ..."
-         "bytes as 0x..."
-         "bytes as a string"))
-
-#|
-bytes
-byte[+ ]base64[+ ](base64)
-byte[+ ]b64[+ ](base64)
-byte[+ ]base64\((base64)\)
-byte[+ ]b64\((base64)\)
-byte[+ ]base32[+ ](base32)
-byte[+ ]b32[+ ](base32)
-byte[+ ]base32\((base32)\)
-byte[+ ]b32\((base32)\)
-byte[+ ](hex-number)
-byte[+ ](string)
-|#
+         "base64 AAAA..."
+         "b64 AAAA..."
+         "base64(AAAA...)"
+         "b64(AAAA...)"
+         "base32 AAAA..."
+         "b32 AAAA..."
+         "base32(AAAA...)"
+         "b32(AAAA...)"
+         "0x0123456789abcdef..."
+         "\"string literal\x01\x02\""))
 
 (define (parse-bytes input)
   (define (fail)
@@ -523,17 +518,9 @@ MESSAGE
       (>>= (p* (cc (^ "\r\n"))) (lift (λ (cs) (apply string cs))))))
 
 (define newline
-  (>>= read-char
-       (λ (c)
-         (if (eqv? c #\newline)
-           (unit #f)
-           (if (eqv? c #\return)
-             (>>= read-char
-                  (λ (c)
-                    (if (eqv? c #\newline)
-                      (unit #f)
-                      fail)))
-             fail)))))
+  (∨ (c #\newline)
+     (>> (c #\return)
+         (c #\newline))))
 
 (define line
   (>>= (p? directive)
@@ -556,10 +543,10 @@ MESSAGE
                                       [_
                                        (error 'parser "expected single result")]))
                           (λ ()
-                            (error 'parse (report input i
-                                                  "an instruction"
-                                                  "a comment"
-                                                  "a pragma directive"))))))))
+                            (error (report input i
+                                           "an instruction"
+                                           "a comment"
+                                           "a pragma directive"))))))))
 
 (define (resolve-control-flow directives)
   (let ([initial-ph (make-placeholder #f)])
@@ -668,7 +655,7 @@ MESSAGE
   (parse-bytes "\"abc\\n\"")
   (parse-bytes "\"abc\\n\\r\"")
   (parse-bytes "\"abc\\n\\r\\t\"")
-  (parse-bytes "\"abc\\n\\r\\t\\0377\"")
+  (parse-bytes "\"abc\\n\\r\\t\\037x7\"")
   (parse-bytes "\"abc\\n\\r\\t\\x10\"")
   (parse-bytes "\"string literal\\xAB\\xCD\\xFF\"")
   
