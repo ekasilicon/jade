@@ -1,9 +1,21 @@
 #lang racket/base
-(require "record.rkt")
+(require racket/match
+         "record.rkt")
 
-(record Monad (unit >>= >>))
+(record Monad (unit >>=))
 
-(record Monad+ (monad mzero mplus))
+(define (>> m)
+  (match-define (Monad >>=) m)
+  (λ (m . ms) (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms)))
 
 (provide Monad
-         Monad+)
+         >>)
+
+(record Monad+ (monad mplus))
+
+(define (mzero m+)
+  (match-define (Monad+ mplus) m+)
+  (mplus))
+
+(provide Monad+
+         mzero)

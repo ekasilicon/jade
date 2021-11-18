@@ -603,7 +603,7 @@
 
 ; instruction-cost : LogicSigVersion => Instruction -> m positive-integer?
 (define (instruction-cost lsv)
-  (match-define (LSV [monad (Monad unit >>= >>)] logic-sig-version) lsv)
+  (match-define (LSV [monad (Monad unit >>=)] logic-sig-version) lsv)
   (define (cost/v1-shift v1-cost v2+-cost)
     (>>= logic-sig-version
          (match-lambda

@@ -26,11 +26,8 @@
        [else (list r)]))
    (m st)))
 
-(define (>> m . ms)
-  (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))
-
 ; (define-type (Step a) (→ (State) (Result a))
-(define step-Monad (Monad unit >>= >>))
+(define step-Monad (Monad unit >>=))
 
 (define ((return code) st)
   (list (returned code)))
@@ -58,11 +55,11 @@
 
 (define step-Monad+
   (Monad+ [monad step-Monad]
-          [mzero (λ (st) (list))]
-          [mplus (λ (m₀ m₁) (λ (st) (append (m₀ st) (m₁ st))))]))
+          [mplus (λ ms (λ (st) (apply append (λ (m) (m st)) ms)))]))
 
 (define step-ReadByte
-  (match-let ([(Monad unit >>= >>) step-Monad])
+  (match-let ([(Monad unit >>=) step-Monad]
+              [>> (>> step-Monad)])
     (ReadByte [monad step-Monad]
               [read-byte (>>= (get bytecode)
                               (λ (bc)
@@ -85,7 +82,8 @@
 
 ; instance VM <hash-thing>
 (define step-VM
-  (match-let ([(Monad+ [monad (Monad unit >>= >>)] mzero mplus) step-Monad+])
+  (match-let ([(Monad+ [monad (Monad unit >>=)] mplus) step-Monad+])
+    (define mzero (mplus))
     (define can-affirm?
       (match-lambda
         [`(= ,x ,y)
@@ -509,18 +507,18 @@
         [transaction (λ (fi) (group-transaction 'this-group-index fi))]
         group-transaction
         ; transaction-array
-        [transaction-array (λ (fi ai) (group-transaction-array 'this-group-index fi ai))]
+        [transaction-array (λ (f ai) (group-transaction-array 'this-group-index f ai))]
         group-transaction-array
         [load
          (λ (i)
-           (>>= (get scratch-space)
+           (>>= (get scratch-space (hasheqv))
                 (λ (ss)
                   (cond
                     [(hash-ref ss i #f) => unit]
                     [else
                      (>> (log "Scratch space slot ~a uninitialized. The Go VM implementation produces 0." i)
                          (unit 0))]))))]
-        [store (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x))))]
+        [store (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x)) (hasheqv)))]
         [balance (λ (acct) (unit `(balance ,acct)))]
         [min-balance (λ (acct) (unit `(min-balance ,acct)))]
         [app-local-get
@@ -594,6 +592,7 @@
 #;
 (require racket/pretty)
 
+#|
 (define (inject lsv bs)
   (hasheq 'logic-sig-version lsv
           'bytecode bs
@@ -637,30 +636,112 @@
   (pretty-print fs)
   
   (set-count fs))
+|#
+(require racket/pretty)
 
+(define (analyze ς)
+  (foldl
+   (λ (r fs)
+     (match r
+       [(underway [values (list)] ς)
+        (analyze ς)]
+       [(failure! message)
+        (printf "failure: ~a\n" message)
+        fs]
+       [(returned code)
+        (displayln "success")
+        (pretty-print code)
+        (pretty-print (hash-ref ς 'OnCompletion))
+        (pretty-print (hash-ref ς 'RekeyTo))
+        #;
+        (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
+        fs]))
+   (set)
+   ((step step-VM) ς)))
+
+
+(require "disassemble.rkt")
+
+(define (run #:approval-program      approval-program
+             #:clear-state-program   clear-state-program
+             #:global-num-byte-slice global-num-byte-slice
+             #:global-num-uint       global-num-uint
+             #:local-num-byte-slice  local-num-byte-slice
+             #:local-num-uint        local-num-uint
+             #:global-state          global-state)
+  (pretty-print (disassemble-bytes approval-program))
+  (let ([ς (hasheq 'ApprovalProgram    approval-program
+                   'ClearStateProgram  clear-state-program
+                   'GlobalNumByteSlice global-num-byte-slice
+                   'GlobalNumUint      global-num-uint
+                   'LocalNumByteSlice  local-num-byte-slice
+                   'LocalNumUint       local-num-uint
+                   'GlobalState        global-state)])
+    (match ((read-varuint prefix-ReadByte) approval-program)
+      [(cons lsv bytecode)
+       (analyze (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
+                       [ς (hash-set ς 'OnCompletion    `3)]
+                       [ς (hash-set ς 'RekeyTo         #f)]
+                       [ς (hash-set ς 'bytecode        bytecode)]
+                       [ς (hash-set ς 'pc              0)]
+                       [ς (hash-set ς 'stack           (list))]
+                       [ς (hash-set ς 'scratch-space   (hasheqv))]
+                       [ς (hash-set ς 'intcblock       (list))]
+                       [ς (hash-set ς 'bytecblock      (list))])
+                  ς))]))
+  
+  #;
+             (run 
+              `(¬ 3))
+             #;
+             (run 
+                  `3)
+             42
+             #;
+  (match ((read-varuint prefix-ReadByte) bytecode)
+    [(cons lsv bytecode)
+     (if (<= lsv 3)
+       (analyze lsv bytecode on-completion)
+       (error 'standard "does not support LogicSigVersion = ~a > 3" lsv))
+     (raise lsv)]
+    [#f
+     (error 'standard "unable to read initial logic signature version")]))
 
 (module+ main
+  (require json
+           net/base64)
+
   (require racket/port
-           racket/pretty)
-
-  (summarize (run (port->bytes (current-input-port)))) 
-
-  #;
+           "disassemble.rkt")
+  
   (match (current-command-line-arguments)
-    [(vector filename)
-     (displayln filename)
-     (match ((read-prefix read-ReadByte) (file->bytes filename))
-       [(cons lsv bs)
-        ])]))
-
-#;
-(= (hi (mulw (+ (+ (txn 4 AssetAmount) 1000) 1)
-             (+ (+ (txn 4 AssetAmount) 1000) 1)))
-   (hi (mulw (+ (txn 2 AssetAmount) (txn 2 Amount))
-             (+ (txn 3 AssetAmount) (txn 3 Amount)))))
-
-#;
-(< (lo (mulw (+ (txn 2 AssetAmount) (txn 2 Amount))
-             (+ (txn 3 AssetAmount) (txn 3 Amount))))
-   (lo (mulw (+ (+ (txn 4 AssetAmount) 1000) 1)
-             (+ (+ (txn 4 AssetAmount) 1000) 1))))
+    [(vector filenames ...)
+     (for-each
+      (λ (filename)
+        (displayln filename)
+        (with-handlers (#;[exn:fail? (λ (e) (displayln (exn-message e)))]
+                        )
+          (match (call-with-input-file filename read-json)
+            [(hash-table ('id id)
+                         ('params (hash-table ('approval-program    approval-program)
+                                              ('clear-state-program clear-state-program)
+                                              ('creator             creator)
+                                              ('global-state        global-entries)
+                                              ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
+                                                                                ('num-uint       global-num-uint)))
+                                              ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
+                                                                                ('num-uint       local-num-uint))))))
+             (run #:approval-program      (base64-decode (string->bytes/utf-8 approval-program))
+                  #:clear-state-program   (base64-decode (string->bytes/utf-8 clear-state-program))
+                  #:global-num-byte-slice global-num-byte-slice
+                  #:global-num-uint       global-num-uint
+                  #:local-num-byte-slice  local-num-byte-slice
+                  #:local-num-uint        local-num-uint
+                  #:global-state          (for/hash ([entry (in-list global-entries)])
+                                            (match entry
+                                              [(hash-table ('key key) ('value value))
+                                               (values (base64-decode (string->bytes/utf-8 key))
+                                                       (match (hash-ref value 'type)
+                                                         [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
+                                                         [2 (hash-ref value 'uint)]))])))])))
+      filenames)]))

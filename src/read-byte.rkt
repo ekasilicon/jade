@@ -19,7 +19,7 @@
 
 ; ReadByte => m int16
 (define (read-int16 rb)
-  (match-define (ReadByte [monad (Monad unit >>= >>)] read-byte) rb)
+  (match-define (ReadByte [monad (Monad unit >>=)] read-byte) rb)
   (>>= read-byte
        (λ (bu)
          (>>= read-byte
@@ -32,7 +32,7 @@
 
 ; ReadByte => m varuint
 (define (read-varuint rb)
-  (match-define (ReadByte [monad (Monad unit >>= >>)] read-byte) rb)
+  (match-define (ReadByte [monad (Monad unit >>=)] read-byte) rb)
   (>>= read-byte
        (λ (b)
          (if (zero? (bitwise-and b #x80))
@@ -41,7 +41,7 @@
 
 ; ReadByte => m bytes
 (define (read-bytes rb)
-  (match-define (ReadByte [monad (Monad unit >>= >>)] read-byte) rb)
+  (match-define (ReadByte [monad (Monad unit >>=)] read-byte) rb)
   (>>= (>>= (read-varuint rb)
             (λ (n)
               (let loop ([n n])
@@ -54,7 +54,7 @@
        (λ (bs) (unit (apply bytes bs)))))
 
 (define (read-intcblock rb)
-  (match-define (ReadByte [monad (Monad unit >>= >>)] read-byte) rb)
+  (match-define (ReadByte [monad (Monad unit >>=)] read-byte) rb)
   (>>= (read-varuint rb) 
        (λ (n)
          (let loop ([n n])
@@ -66,7 +66,7 @@
                          (λ (xs) (unit (cons x xs)))))))))))
 
 (define (read-bytecblock rb)
-  (match-define (ReadByte [monad (Monad unit >>= >>)] read-byte) rb)
+  (match-define (ReadByte [monad (Monad unit >>=)] read-byte) rb)
   (>>= (read-varuint rb) 
        (λ (n)
          (let loop ([n n])

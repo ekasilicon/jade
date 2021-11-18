@@ -1,5 +1,23 @@
 #lang scribble/base
 
+Jade is a fully-automatic static analysis tool for TEAL bytecode.
+
+Currently, Jade supports TEALv3 bytecode and ensures that TEAL programs abide by the following constraints:
+
+First, each successful execution of the program must constrain the @something{OnCompletion} property appropriately. [what does this mean?]
+
+Second, each successful execution of the program must constrain the @something{RekeyTo} property to be the zero address.
+If the program permits other addresses, then it [may be, in some cases, check about transaction groups] is possible to construct a transaction which changes the account authorization [verbiage?] key.
+If an attacker is able to coax a user to submit a transaction to the Algorand network with @something{RekeyTo} set to an attacker-chosen key, then the attacker can assume control of the account.
+[talk about the forms an attacker could take]
+
+Currently, the tool ingests TEALv3 bytecode.
+By default, the tool interprets all constants within the program literally.
+Thus, the default behavior demonstrates that a particular program abides by the constraints.
+However, many such TEALv3 programs are generated from a template by replacing in template variables with concrete values.
+To demonstrate that any program generated from the template abides by the properties, the user of the tool may specify constants within the program which should not be treated literally but which instead stand for template variables.
+So specified, the tool reports whether the program abides by the constraints @emph{for any legal choice of concrete constant values}.
+
 how to acquire the tool
 (download a Dockerized executable)
 

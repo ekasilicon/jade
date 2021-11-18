@@ -12,12 +12,7 @@
                 (λ (bs)
                   (match (m bs)
                     [(cons x bs) ((f x) bs)]
-                    [#f #f])))]
-         [>> (λ (m₀ m₁)
-               (λ (bs)
-                 (match (m₀ bs)
-                   [(cons _ bs) (m₁ bs)]
-                   [#f #f])))]))
+                    [#f #f])))]))
 
 (define prefix-ReadByte
   (ReadByte [monad prefix-Monad]

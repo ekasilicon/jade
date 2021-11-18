@@ -15,6 +15,14 @@
              => values]
             [else
              (raise-syntax-error #f "unknown field" fld-stx)])))
+  (define-syntax-class field-init
+    #:attributes [field expression]
+    (pattern fld:id
+             #:attr field #'fld
+             #:attr expression #'fld)
+    (pattern [fld:id exp]
+             #:attr field #'fld
+             #:attr expression #'exp))
   (struct record-info (fields
                        type
                        constructor
@@ -25,14 +33,6 @@
     (λ (self stx)
       (match-let ([(record-info flds type cons ? ref set!) self])
         (define field-index (make-field-index flds))
-        (define-syntax-class field-init
-          #:attributes [field expression]
-          (pattern fld:id
-                   #:attr field #'fld
-                   #:attr expression #'fld)
-          (pattern [fld:id exp]
-                   #:attr field #'fld
-                   #:attr expression #'exp))
         (with-syntax ([cons cons]
                       [ref ref])
           (syntax-parse stx
@@ -74,7 +74,7 @@
             [(_ fp:field-pat ...)
              #'(? pred (and (app (λ (x) (ref x fp.field-index)) fp.pattern)
                             ...))])))))
-  (provide record-info record-info?))
+  (provide record-info record-info? field-init))
 
 (define-syntax record
   (syntax-parser

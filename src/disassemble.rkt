@@ -23,6 +23,7 @@
      (failure message)]
     [#f
      #f]))
+
 (define (>> m . ms) (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))
 
 (define ((mplus m₀ m₁) bs s i)
@@ -34,7 +35,7 @@
   (failure [message (apply format template args)]))
 
 (define Disassemble-ReadByte
-  (ReadByte [monad (Monad unit >>= >>)]
+  (ReadByte [monad (Monad unit >>=)]
             [read-byte (λ (bs s i)
                          (if (= (bytes-length bs) i)
                            #f
@@ -245,4 +246,8 @@
 (module+ main
   (require racket/pretty)
 
-  (pretty-print (disassemble-port (current-input-port))))
+  (match (current-command-line-arguments)
+    [(vector filenames ...)
+     (for-each
+      (λ (filename) (pretty-print (call-with-input-file filename disassemble-port)))
+      filenames)]))
