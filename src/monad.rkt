@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/match
-         "record.rkt")
+         "static/record.rkt")
 
 (record Monad (unit >>=))
 

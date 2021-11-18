@@ -2,9 +2,9 @@
 (require racket/match
          racket/set
          racket/port
-         "record.rkt"
-         "sumtype.rkt"
-         "monad.rkt"
+         "static/record.rkt"
+         "static/sumtype.rkt"
+         (rename-in "monad.rkt" [>> make->>])
          "read-byte.rkt"
          (prefix-in i: "instruction.rkt"))
 
@@ -24,7 +24,9 @@
     [#f
      #f]))
 
-(define (>> m . ms) (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))
+(define Disassemble-Monad (Monad unit >>=))
+
+(define >> (make->> Disassemble-Monad))
 
 (define ((mplus m₀ m₁) bs s i)
   (cond
@@ -34,8 +36,11 @@
 (define ((fail template . args) bs s i)
   (failure [message (apply format template args)]))
 
+(define ((fail/context make) bs s i)
+  (make (λ (template . args) (failure [message (apply format template args)])) bs i))
+
 (define Disassemble-ReadByte
-  (ReadByte [monad (Monad unit >>=)]
+  (ReadByte [monad Disassemble-Monad]
             [read-byte (λ (bs s i)
                          (if (= (bytes-length bs) i)
                            #f
@@ -84,11 +89,12 @@
        (λ (lft)
          (mplus (>> stream-end
                     (mupdate 'instructions (λ (h) (hash-set h lft `(done))) (hasheqv)))
-                (>> (>>= disassemble-instruction
-                         (λ (instr)
-                           (>>= position
-                                (λ (rgt)
-                                  (mupdate 'instructions (λ (h) (hash-set h lft `(succ ,instr ,rgt))) (hasheqv))))))
+                (>> (mplus (>>= disassemble-instruction
+                                (λ (instr)
+                                  (>>= position
+                                       (λ (rgt)
+                                         (mupdate 'instructions (λ (h) (hash-set h lft `(succ ,instr ,rgt))) (hasheqv))))))
+                           (fail/context (λ (fail bs i) (fail "unrecognized instruction at byte offset ~a: ~a" i (number->string (bytes-ref bs i) 16)))))
                     disassemble-instruction-stream)))))
 
 (define disassemble
@@ -116,6 +122,8 @@
   i:Instruction
   (pragma content)
   (label ℓ))
+
+(provide Directive)
 
 (define (state→assembly state)
   (cons (pragma [content (format "version ~a" (hash-ref state 'logic-sig-version))])
@@ -246,8 +254,4 @@
 (module+ main
   (require racket/pretty)
 
-  (match (current-command-line-arguments)
-    [(vector filenames ...)
-     (for-each
-      (λ (filename) (pretty-print (call-with-input-file filename disassemble-port)))
-      filenames)]))
+  (pretty-print (disassemble-port (current-input-port))))

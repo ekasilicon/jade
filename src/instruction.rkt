@@ -1,7 +1,7 @@
 #lang racket/base
 (require (prefix-in r: (only-in racket/base <=))
          racket/match
-         "sumtype.rkt"
+         "static/sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
          (rename-in "logic-sig-version.rkt" [LogicSigVersion LSV]))

@@ -2,7 +2,7 @@
 (require racket/match
          racket/cmdline
          racket/port
-         "src/parse.rkt"
+         "parse.rkt"
          #;
          "src/incremental.rkt")
 

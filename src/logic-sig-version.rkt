@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/match
-         "record.rkt"
+         "static/record.rkt"
          "monad.rkt")
 
 ; class Monad monad => LogicSigVersion

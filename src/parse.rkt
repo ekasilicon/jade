@@ -2,8 +2,8 @@
 (require racket/match
          racket/string
          racket/pretty
-         "record.rkt"
-         "sumtype.rkt"
+         "static/record.rkt"
+         "static/sumtype.rkt"
          (prefix-in i: "instruction.rkt"))
 
 ; Need to add cut so that committed failure can be represented
