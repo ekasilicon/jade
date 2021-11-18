@@ -1,5 +1,5 @@
 #lang racket/base
-(require "record.rkt")
+(require "static/record.rkt")
 
 (record ArithmeticLogicUnit (+ - / * % & \| ^ ~ < ==))
 

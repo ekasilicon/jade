@@ -3,8 +3,7 @@
          racket/cmdline
          racket/port
          "parse.rkt"
-         #;
-         "src/incremental.rkt")
+         "unconstrained-parameter-analysis.rkt")
 
 (let ([constants (hash)]
       [mode #f])
@@ -117,13 +116,10 @@ MESSAGE
    (match mode
      [(cons 'raw-binary program-type)
       (void)
-      #;
       (analyze/raw-binary program-type
                           (standard-input-bytes "raw binary")
                           constants)]
      [(cons 'json-package #f)
-      (void)
-      #;
       (analyze/json-package (standard-input-bytes "JSON package")
                             constants)]
      [#f

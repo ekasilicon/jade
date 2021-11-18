@@ -2,7 +2,7 @@
 (require (for-syntax racket/base
                      racket/match
                      syntax/parse)
-         "record.rkt")
+         "static/record.rkt")
 
 (define-syntax unimplemented
   (syntax-parser

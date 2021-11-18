@@ -1,7 +1,7 @@
 #lang racket/base
 (require (except-in racket/match ==)
-         "record.rkt"
-         "sumtype.rkt"
+         "static/record.rkt"
+         "static/sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
          "logic-sig-version.rkt"

@@ -2,7 +2,7 @@
 (require racket/match
          racket/set
          (only-in racket/list append-map)
-         "sumtype.rkt"
+         "static/sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
          "logic-sig-version.rkt"
@@ -116,6 +116,7 @@
      [put-bytecblock (λ (bss) (put bytecblock bss))]
      [arg (p arg 1)]
      [push-call ()]
+     [pop-call ()]
      #|
      [&& (λ (s₀ s₁) (unit `(∧ ,s₀ ,s₁)))]
      [\|\| (λ (s₀ s₁) (unit `(∨ ,s₀ ,s₁)))]
@@ -337,7 +338,7 @@
    (set)
    ((step standard-VM) ς)))
 
-(require "disassemble.rkt")
+(require (prefix-in d: "disassemble.rkt"))
 
 (define (run #:approval-program      approval-program
              #:clear-state-program   clear-state-program

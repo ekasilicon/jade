@@ -123,7 +123,7 @@
   (pragma content)
   (label ℓ))
 
-(provide Directive)
+(provide (sumtype-out Directive))
 
 (define (state→assembly state)
   (cons (pragma [content (format "version ~a" (hash-ref state 'logic-sig-version))])
