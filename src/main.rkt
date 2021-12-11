@@ -9,10 +9,7 @@
       [mode #f])
   (command-line
    #:program "jade"
-   #:argv (match (current-command-line-arguments)
-            [(vector)
-             (vector "--help")]
-            [ccla ccla])
+   #:argv (current-command-line-arguments)
    #:usage-help
    ""
    "jade analyzes the TEAL program bytecode supplied to standard input."
@@ -23,7 +20,7 @@
      "The acceptable syntaxes of <bytes-constant> are those"
      "acceptable to the official TEAL assembler."
      "This option is intended for TEAL program templates"
-     "in which certain byte sconstants can be instantiated"
+     "in which certain bytes constants can be instantiated"
      "to create a program."
      "By instantiating these constants with unique dummy"
      "values, jade can analyze an assembled program"
@@ -84,7 +81,8 @@
      ""
      "with documentation at"
      ""
-     "   https://algoexplorer.io/api-dev/v2")
+     "  https://algoexplorer.io/api-dev/v2"
+     "")
     (set! mode (cons 'json-package #f))]
    [("--raw-binary" "-j") program-type
     ("Tell jade to expect raw bytecode binary on standard input"
@@ -123,8 +121,24 @@ MESSAGE
       (analyze/json-package (standard-input-bytes "JSON package")
                             constants)]
      [#f
-      (displayln "Expected either --raw-binary or --json-package flag.")
-      (exit 255)])))
+      (match (current-command-line-arguments)
+        ; no arguments at all
+        [(vector)
+         (displayln #<<MESSAGE
+usage: jade [ <option> ... ]
+  
+  jade analyzes the TEAL program bytecode supplied to standard input.
+  It expects either the --json-package flag or the --raw-binary flag.
+  Guidance for use of these flags, and others, is avaliable via the
+  command
+
+                          jade --help
+
+MESSAGE
+                    )]
+        [_
+         (displayln "Expected either --raw-binary or --json-package flag.")]
+        (exit 255))])))
 
 ; put this handler after the command-line parsing because
 ; `command-line` exceptions are caught by it otherwise.

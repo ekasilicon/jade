@@ -1,45 +1,28 @@
 #lang racket/base
 (require (prefix-in r: (only-in racket/base <=))
+         (only-in racket/list take)
          racket/match
          "static/sumtype.rkt"
+         "static/object.rkt"
+         #;"static/sumtype-extra.rkt"
          "monad.rkt"
          "read-byte.rkt"
+         #;
          (rename-in "logic-sig-version.rkt" [LogicSigVersion LSV]))
 
-(require (for-syntax racket/base
-                     racket/match
-                     syntax/parse))
+(define read0
+  (inc (logic-sig-version
+        >>=)
+       [decode-instruction
+        (λ (oc)
+          (>>= logic-sig-version
+               (λ (lsv)
+                 (error 'read-instruction
+                        "illegal opcode ~a for TEAL version ~a"
+                        (number->string oc 16)
+                        lsv))))]))
 
-(define-syntax index→enumtype
-  (syntax-parser
-    [(_ typename:id)
-     (match (syntax-local-value #'typename (λ () #f))
-       [(sumtype-info variants)
-        (with-syntax ([(i ...) (for/list ([i (in-naturals)]
-                                          [_ (in-list variants)])
-                                 i)]
-                      [(variant ...) variants])
-          #'(match-lambda [i (variant)] ...))]
-       [_ (raise-syntax-error #f "not a sumtype" #'typename)])]))
-
-(define-syntax sumtype-name
-  (syntax-parser
-    [(_ typename:id)
-     (match (syntax-local-value #'typename (λ () #f))
-       [(sumtype-info variants)
-        (with-syntax ([(variant ...)
-                       variants]
-                      [(variant-name ...)
-                       (map symbol->string (map syntax->datum variants))])
-          #'(sumtype-case-lambda typename
-              [(variant) variant-name] ...))]
-       [_ (raise-syntax-error #f "not a sumtype" #'typename)])]))
-
-(define-syntax-rule (enumtype-case-lambda type [(recname ...) body ...] ...)
-  (sumtype-case-lambda type
-    [((recname) ...) body ...] ...))
-
-(define-sumtype TransactionField
+(define-sumtype TransactionField1
   (Sender)
   (Fee)
   (FirstValid)
@@ -62,7 +45,155 @@
   (AssetSender)
   (AssetReceiver)
   (AssetCloseTo)
-  (GroupIndex)
+  (GroupIndex))
+
+(define-sumtype GlobalField1
+  (MinTxnFee)
+  (MinBalance)
+  (MaxTxnLife)
+  (ZeroAddress)
+  (GroupSize))
+
+(define-sumtype Instruction1
+  (err)
+  (sha256)
+  (keccak256)
+  (sha512_256)
+  (ed25519verify)
+  (+)
+  (-)
+  (/)
+  (*)
+  (<)
+  (>)
+  (<=)
+  (>=)
+  (&&)
+  (\|\|)
+  (==)
+  (!=)
+  (!)
+  (len)
+  (itob)
+  (btoi)
+  (%)
+  (\|)
+  (&)
+  (^)
+  (~)
+  (mulw)
+  (intcblock uints)
+  (intc i)
+  (intc_0)
+  (intc_1)
+  (intc_2)
+  (intc_3)
+  (bytecblock bytess)
+  (bytec i)
+  (bytec_0)
+  (bytec_1)
+  (bytec_2)
+  (bytec_3)
+  (arg n)
+  (arg_0)
+  (arg_1)
+  (arg_2)
+  (arg_3)
+  (txn field)
+  (global field)
+  (gtxn group-index field)
+  (load i)
+  (store i)
+  (bnz offset)
+  (pop)
+  (dup))
+
+(define read1
+  (inc (read-opcode read-uint8 read-offset read-intcblock read-bytecblock
+        unit >>=)
+       [instruction-logic-signature-version
+        (sumtype-case-lambda Instruction1
+          #:otherwise _ 1)]
+       [instruction-name
+        (sumtype-case-lambda Instruction1
+          #:otherwise _ "Instruction1")]
+       [read-instruction
+        (>>= read-opcode decode-instruction)]
+       [decode-instruction
+        (match-lambda
+          [#x00 (unit (err))]
+          [#x01 (unit (sha256))]
+          [#x02 (unit (keccak256))]
+          [#x03 (unit (sha512_256))]
+          [#x04 (unit (ed25519verify))]
+          [#x08 (unit (+))]
+          [#x09 (unit (-))]
+          [#x0a (unit (/))]
+          [#x0b (unit (*))]
+          [#x0c (unit (<))]
+          [#x0d (unit (>))]
+          [#x0e (unit (<=))]
+          [#x0f (unit (>=))]
+          [#x10 (unit (&&))]
+          [#x11 (unit (\|\|))]
+          [#x12 (unit (==))]
+          [#x13 (unit (!=))]
+          [#x14 (unit (!))]
+          [#x15 (unit (len))]
+          [#x16 (unit (itob))]
+          [#x17 (unit (btoi))]
+          [#x18 (unit (%))]
+          [#x19 (unit (\|))]
+          [#x1a (unit (&))]
+          [#x1b (unit (^))]
+          [#x1c (unit (~))]
+          [#x1d (unit (mulw))]
+          [#x20 (>>= read-intcblock (λ (uints) (unit (intcblock uints))))]
+          [#x21 (>>= read-uint8 (λ (i) (unit (intc i))))]
+          [#x22 (unit (intc_0))]
+          [#x23 (unit (intc_1))]
+          [#x24 (unit (intc_2))]
+          [#x25 (unit (intc_3))]
+          [#x26 (>>= read-bytecblock (λ (bytess) (unit (bytecblock bytess))))]
+          [#x27 (>>= read-uint8 (λ (i) (unit (bytec i))))]
+          [#x28 (unit (bytec_0))]
+          [#x29 (unit (bytec_1))]
+          [#x2a (unit (bytec_2))]
+          [#x2b (unit (bytec_3))]
+          [#x2c (>>= read-uint8 (λ (n) (unit (arg n))))]
+          [#x2d (unit (arg_0))]
+          [#x2e (unit (arg_1))]
+          [#x2f (unit (arg_2))]
+          [#x30 (unit (arg_3))]
+          [#x31 (>>= read-transaction-field (λ (field) (unit (txn field))))]
+          [#x32 (>>= read-global-field (λ (f) (unit (global [field f]))))]
+          [#x33 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (unit (gtxn group-index field))))))]
+          [#x34 (>>= read-uint8 (λ (i) (unit (load i))))]
+          [#x35 (>>= read-uint8 (λ (i) (unit (store i))))]
+          [#x40 (>>= read-offset (λ (offset) (unit (bnz offset))))]
+          [#x48 (unit (pop))]
+          [#x49 (unit (dup))]
+          [oc   ((super decode-instruction) oc)])]
+       [read-transaction-field
+        (>>= read-uint8 decode-transaction-field)]
+       [decode-transaction-field
+        (match-lambda
+          [bc (error 'decode-transaction-field "fill this in (1)")]
+          [bc ((super decode-transaction-field) bc)])]
+       [read-global-field
+        (>>= read-uint8 decode-global-field)]
+       [decode-global-field
+        (match-lambda
+          [bc (error 'decode-global-field "fill this in (1)")]
+          [bc ((super decode-global-field) bc)])]))
+
+(provide (sumtype-out Instruction1)
+         (sumtype-out TransactionField1)
+         (sumtype-out GlobalField1)
+         read1)
+
+(define-sumtype TransactionField2
+  TransactionField1
   (TxID)
   (ApplicationID)
   (OnCompletion)
@@ -87,7 +218,99 @@
   (ConfigAssetClawback)
   (FreezeAsset)
   (FreezeAssetAccount)
-  (FreezeAssetFrozen)
+  (FreezeAssetFrozen))
+
+(define-sumtype GlobalField2
+  GlobalField1
+  (LogicSigVersion)
+  (Round)
+  (LatestTimestamp)
+  (CurrentApplicationID))
+
+(define-sumtype Instruction2
+  Instruction1
+  (addw)
+  (txna field array-index)
+  (gtxna group-index field array-index)
+  (bz offset)
+  (b offset)
+  (return)
+  (dup2)
+  (concat)
+  (substring start end)
+  (substring3)
+  (balance)
+  (app_opted_in)
+  (app_local_get)
+  (app_local_get_ex)
+  (app_global_get)
+  (app_global_get_ex)
+  (app_local_put)
+  (app_global_put)
+  (app_local_del)
+  (app_global_del)
+  (asset_holding_get field)
+  (asset_params_get field))
+
+(define read2
+  (inc (read-transaction-field read-global-field
+        read-uint8 read-offset read-bytes read-varuint
+        unit >>=)
+       [instruction-logic-signature-version
+        (sumtype-case-lambda Instruction2
+          [(Instruction1 instr) 
+           ((super instruction-logic-signature-version) instr)]
+          #:otherwise _ 2)]
+       [decode-instruction
+        (match-lambda
+          [#x1e (unit (addw))]
+          [#x31 (>>= read-transaction-field (λ (field) (unit (txn field))))]
+          [#x32 (>>= read-global-field (λ (field) (unit (global field))))]
+          [#x33 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (unit (gtxn group-index field))))))]
+          [#x36 (>>= read-transaction-field (λ (field) (>>= read-uint8 (λ (array-index) (unit (txna field array-index))))))]
+          [#x37 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (>>= read-uint8 (λ (array-index) (unit (gtxna group-index field array-index))))))))]
+          [#x41 (>>= read-offset (λ (offset) (unit (bz offset))))]
+          [#x42 (>>= read-offset (λ (offset) (unit (b offset))))]
+          [#x43 (unit (return))]
+          [#x4a (unit (dup2))]
+          [#x50 (unit (concat))]
+          [#x51 (>>= read-uint8 (λ (start) (>>= read-uint8 (λ (end) (unit (substring start end))))))]
+          [#x52 (unit (substring3))]
+          [#x60 (unit (balance))]
+          [#x61 (unit (app_opted_in))]
+          [#x62 (unit (app_local_get))]
+          [#x63 (unit (app_local_get_ex))]
+          [#x64 (unit (app_global_get))]
+          [#x65 (unit (app_global_get_ex))]
+          [#x66 (unit (app_local_put))]
+          [#x67 (unit (app_global_put))]
+          [#x68 (unit (app_local_del))]
+          [#x69 (unit (app_global_del))]
+          [#x70 (>>= read-asset-holding-field (λ (field) (unit (asset_holding_get field))))]
+          [#x71 (>>= read-asset-params-field (λ (field) (unit (asset_params_get field))))]
+          [oc   ((super decode-instruction) oc)])]
+       [decode-transaction-field
+        (match-lambda
+          [bc (error 'decode-transaction-field "fill this in (2)")]
+          [bc ((super decode-transaction-field) bc)])]
+       [decode-global-field
+        (match-lambda)]
+       [read-asset-holding-field
+        (>>= read-uint8 decode-asset-holding-field)]
+       [decode-asset-holding-field
+        (match-lambda)]
+       [read-asset-params-field
+        (>>= read-uint8 decode-asset-params-field)]
+       [decode-asset-params-field
+        (match-lambda)]))
+
+(provide (sumtype-out Instruction2)
+         (sumtype-out TransactionField2)
+         (sumtype-out GlobalField2)
+         read2)
+
+(define-sumtype TransactionField3
+  TransactionField2
   (Assets)
   (NumAssets)
   (Applications)
@@ -95,24 +318,280 @@
   (GlobalNumUint)
   (GlobalNumByteSlice)
   (LocalNumUint)
-  (LocalNumByteSlice)
-  (ExtraProgramPages)
+  (LocalNumByteSlice))
+
+(define-sumtype GlobalField3
+  (CreatorAddress))
+
+(define-sumtype Instruction3
+  Instruction2
+  (gtxns field)
+  (gtxnsa field array-index)
+  (assert)
+  (dig n)
+  (swap)
+  (select)
+  (getbit)
+  (setbit)
+  (getbyte)
+  (setbyte)
+  (min_balance)
+  (pushbytes bytes)
+  (pushint uint))
+
+(define read3
+  (inc (read-transaction-field read-global-field
+        read-uint8 read-offset read-bytes read-varuint
+        unit >>=)
+       [decode-instruction
+        (match-lambda
+          [#x31 (>>= read-transaction-field (λ (field) (unit (txn field))))]
+          [#x32 (>>= read-global-field (λ (field) (unit (global field))))]
+          [#x33 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (unit (gtxn group-index field))))))]
+          [#x36 (>>= read-transaction-field (λ (field) (>>= read-uint8 (λ (array-index) (unit (txna field array-index))))))]
+          [#x37 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (>>= read-uint8 (λ (array-index) (unit (gtxna group-index field array-index))))))))]
+          [#x38 (>>= read-transaction-field (λ (field) (unit (gtxns field))))]
+          [#x39 (>>= read-transaction-field (λ (field) (>>= read-uint8 (λ (array-index) (unit (gtxnsa field array-index))))))]
+          [#x44 (unit (assert))]
+          [#x4b (>>= read-uint8 (λ (n) (unit (dig n))))]
+          [#x4c (unit (swap))]
+          [#x4d (unit (select))]
+          [#x53 (unit (getbit))]
+          [#x54 (unit (setbit))]
+          [#x55 (unit (getbyte))]
+          [#x56 (unit (setbyte))]
+          [#x57 (>>= read-uint8 (λ (start) (>>= read-uint8 (λ (length) (unit (extract start length))))))]
+          [#x78 (unit (min_balance))]
+          [#x80 (>>= read-bytes (λ (bytes) (unit (pushbytes bytes))))]
+          [#x81 (>>= read-varuint (λ (uint) (unit (pushint uint))))]
+          [oc   ((super decode-instruction) oc)])]
+       [decode-transaction-field
+        (match-lambda
+          [bc (error 'decode-transaction-field "fill this in (3)")]
+          [bc ((super decode-transaction-field) bc)])]))
+
+(provide (sumtype-out Instruction3)
+         (sumtype-out TransactionField3)
+         (sumtype-out GlobalField3)
+         read3)
+
+(define-sumtype TransactionField4
+  TransactionField3
+  (ExtraProgramPages))
+
+(define-sumtype GlobalField4
+  GlobalField3)
+
+(define-sumtype Instruction4
+  Instruction3
+  (divmodw)
+  (gload group-index i)
+  (gloads i)
+  (gaid group-index)
+  (gaids)
+  (callsub offset)
+  (retsub)
+  (shl)
+  (shr)
+  (sqrt)
+  (bitlen)
+  (exp)
+  (expw)
+  (b+)
+  (b-)
+  (b/)
+  (b*)
+  (b<)
+  (b>)
+  (b<=)
+  (b>=)
+  (b==)
+  (b!=)
+  (b%)
+  (b\|)
+  (b&)
+  (b^)
+  (b~)
+  (bzero))
+
+(define read4
+  (inc (read-uint8 read-offset
+        unit >>=)
+       [decode-instruction
+        (match-lambda
+          [#x1f (unit (divmodw))]
+          [#x3a (>>= read-uint8 (λ (group-index) (>>= read-uint8 (λ (i) (unit (gload group-index i))))))]
+          [#x3b (>>= read-uint8 (λ (i) (unit (gloads i))))]
+          [#x3c (>>= read-uint8 (λ (group-index) (unit (gaid group-index))))]
+          [#x3d (unit (gaids))]
+          [#x88 (>>= read-offset (λ (offset) (unit (callsub offset))))]
+          [#x89 (unit (retsub))]
+          [#x90 (unit (shl))]
+          [#x91 (unit (shr))]
+          [#x92 (unit (sqrt))]
+          [#x93 (unit (bitlen))]
+          [#x94 (unit (exp))]
+          [#x95 (unit (expw))]
+          [#xa0 (unit (b+))]
+          [#xa1 (unit (b-))]
+          [#xa2 (unit (b/))]
+          [#xa3 (unit (b*))]
+          [#xa4 (unit (b<))]
+          [#xa5 (unit (b>))]
+          [#xa6 (unit (b<=))]
+          [#xa7 (unit (b>=))]
+          [#xa8 (unit (b==))]
+          [#xa9 (unit (b!=))]
+          [#xaa (unit (b%))]
+          [#xab (unit (b\|))]
+          [#xac (unit (b&))]
+          [#xad (unit (b^))]
+          [#xae (unit (b~))]
+          [#xaf (unit (bzero))]
+          [oc   ((super decode-instruction) oc)])]
+       [decode-transaction-field
+        (match-lambda
+          [bc (error 'decode-transaction-field "fill this in (4)")]
+          [bc ((super decode-transaction-field) bc)])]))
+
+(provide (sumtype-out Instruction4)
+         (sumtype-out TransactionField4)
+         (sumtype-out GlobalField4)
+         read4)
+
+(define-sumtype TransactionField5
+  TransactionField4
   (Nonparticipation)
   (Logs)
   (NumLogs)
   (CreatedAssetID)
   (CreatedApplicationID))
 
-(define transaction-field
-  (index→enumtype TransactionField))
+(define-sumtype GlobalField5
+  GlobalField4)
 
-(define transaction-field-name
-  (sumtype-name TransactionField))
+(define-sumtype Instruction5
+  Instruction4
+  (ecdsa_verify v)
+  (ecdsa_pk_decompress v)
+  (ecdsa_pk_recover v)
+  (loads)
+  (stores)
+  (cover n)
+  (uncover n)
+  (extract start length)
+  (extract3)
+  (extract_uint16)
+  (extract_uint32)
+  (extract_uint64)
+  (app_params_get field)
+  (log)
+  (itxn_begin)
+  (itxn_field field)
+  (itxn_submit)
+  (itxn field)
+  (itxna field array-index)
+  (txnas field)
+  (gtxnas group-index field)
+  (gtxnsas field)
+  (args))
 
-(define (read-transaction-field rb)
-  (match-define (ReadByte [monad (Monad unit >>=)]) rb)
-  (>>= (read-uint8 rb) (λ (i) (unit (transaction-field i))) ))
+(define read5
+  (inc (read-transaction-field
+        read-uint8
+        unit >>=)
+       [decode-instruction
+        (match-lambda
+          [#x05 (>>= read-uint8 (λ (v) (unit (ecdsa_verify v))))]
+          [#x06 (>>= read-uint8 (λ (v) (unit (ecdsa_pk_decompress v))))]
+          [#x07 (>>= read-uint8 (λ (v) (unit (ecdsa_pk_recover v))))]
+          [#x3e (unit (loads))]
+          [#x3f (unit (stores))]
+          [#x4e (>>= read-uint8 (λ (n) (unit (cover n))))]
+          [#x4f (>>= read-uint8 (λ (n) (unit (uncover n))))]
+          [#x57 (>>= read-uint8 (λ (start) (>>= read-uint8 (λ (length) (unit (extract start length))))))]
+          [#x58 (unit (extract3))]
+          [#x59 (unit (extract_uint16))]
+          [#x5a (unit (extract_uint32))]
+          [#x5b (unit (extract_uint64))]
+          [#x72 (>>= read-app-params-field (λ (f) (unit (app_params_get [field f]))))]
+          [#xb0 (unit (log))]
+          [#xb1 (unit (itxn_begin))]
+          [#xb2 (>>= read-transaction-field (λ (field) (unit (itxn_field field))))]
+          [#xb3 (unit (itxn_submit))]
+          [#xb4 (>>= read-transaction-field (λ (field) (unit (itxn field))))]
+          [#xb5 (>>= read-transaction-field (λ (field) (>>= read-uint8 (λ (array-index) (unit (itxna field array-index))))))]
+          [#xc0 (>>= read-transaction-field (λ (field) (unit (txnas field))))]
+          [#xc1 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (unit (gtxnas group-index field))))))]
+          [#xc2 (>>= read-transaction-field (λ (field) (unit (gtxnsas field))))]
+          [#xc3 (unit (args))]
+          [oc   ((super decode-instruction) oc)])]
+       [decode-transaction-field
+        (match-lambda
+          [bc (error 'decode-transaction-field "fill this in (5)")]
+          [bc ((super decode-transaction-field) bc)])]
+       [read-app-params-field
+        (>>= read-uint8 decode-app-params-field)]
+       [decode-app-params-field
+        (match-lambda)]))
 
+(provide (sumtype-out Instruction5)
+         (sumtype-out TransactionField5)
+         (sumtype-out GlobalField5)
+         read5)
+
+(define-sumtype TransactionField6
+  TransactionField5)
+
+(define-sumtype GlobalField6
+  GlobalField5)
+
+(define-sumtype Instruction6
+  Instruction5
+  (itxn_next))
+
+(define read6
+  (inc (unit)
+       [decode-instruction
+        (match-lambda
+          [#xb6 (unit (itxn_next))]
+          [oc   ((super decode-instruction) oc)])]))
+
+(provide (sumtype-out Instruction6)
+         (sumtype-out TransactionField6)
+         (sumtype-out GlobalField6)
+         read6)
+
+(define (read/version v)
+  (if (and (exact-nonnegative-integer? v)
+           (r:<= 1 v 6))
+    (apply mix
+           read-byte-extras
+           (reverse (take (list read0 read1 read2 read3 read4 read5 read6) (add1 v))))
+    (error 'read/version "expected version 1, 2, 3, 4, 5, or 6; received ~v" v)))
+
+(provide read/version)
+
+(module+ main
+  (((fix (mix (read/version 1)
+              (inc ()
+                   [unit (λ xs (λ (σ) (cons xs σ)))]
+                   [>>= (λ (m f)
+                          (λ (σ)
+                            (match-let ([(cons xs σ) (m σ)])
+                              ((apply f xs) σ))))])
+              (inc (unit)
+                   [logic-sig-version (unit 22)])
+              (inc (unit)
+                   [read-byte (unit 0)])))
+    'read-instruction)
+   10))
+
+
+
+
+
+#;
 (define transaction-field-logic-signature-version
   (enumtype-case-lambda TransactionField
     [(Sender Fee FirstValid FirstValidTime LastValid Note Lease
@@ -136,22 +615,32 @@
     [(Nonparticipation Logs NumLogs CreatedAssetID CreatedApplicationID)
      5]))
 
-(provide (sumtype-out TransactionField)
+#|
+(provide (sumtype-out TransactionField1)
+         (sumtype-out TransactionField2)
+         (sumtype-out TransactionField3)
+         (sumtype-out TransactionField4)
+         (sumtype-out TransactionField5)
+         (sumtype-out TransactionField6)
          transaction-field-name
          read-transaction-field
          transaction-field-logic-signature-version)
 
-(define-sumtype GlobalField
-  (MinTxnFee)
-  (MinBalance)
-  (MaxTxnLife)
-  (ZeroAddress)
-  (GroupSize)
-  (LogicSigVersion)
-  (Round)
-  (LatestTimestamp)
-  (CurrentApplicationID)
-  (CreatorAddress)
+(provide (sumtype-out TransactionField1)
+         (sumtype-out TransactionField2)
+         (sumtype-out TransactionField3)
+         (sumtype-out TransactionField4)
+         (sumtype-out TransactionField5)
+         (sumtype-out TransactionField6)
+         transaction-field-name
+         read-transaction-field
+         transaction-field-logic-signature-version)
+
+(define-sumtype GlobalField4
+  GlobalField3)
+
+(define-sumtype GlobalField5
+  GlobalField4
   (CurrentApplicationAddress)
   (GroupID))
 
@@ -235,7 +724,7 @@
          asset-params-field-name
          read-asset-params-field
          asset-params-field-logic-signature-version)
-
+|#
 (define-sumtype AppParamsField
   (AppApprovalProgram)
   (AppClearStateProgram)
@@ -247,161 +736,32 @@
   (AppCreator)
   (AppAddress))
 
+#;
 (define app-params-field
   (index→enumtype AppParamsField))
 
+#;
 (define app-params-field-name
   (sumtype-name AppParamsField))
 
+#;
 (define (read-app-params-field rb)
   (match-define (ReadByte [monad (Monad unit >>=)]) rb)
   (>>= (read-uint8 rb) (λ (i) (unit (app-params-field i)))))
 
+#;
 (provide (sumtype-out AppParamsField)
          app-params-field-name
          read-app-params-field)
 
-(define-sumtype Instruction
-  (err)
-  (sha256)
-  (keccak256)
-  (sha512_256)
-  (ed25519verify)
-  (ecdsa_verify v)
-  (ecdsa_pk_decompress v)
-  (ecdsa_pk_recover v)
-  (+)
-  (-)
-  (/)
-  (*)
-  (<)
-  (>)
-  (<=)
-  (>=)
-  (&&)
-  (\|\|)
-  (==)
-  (!=)
-  (!)
-  (len)
-  (itob)
-  (btoi)
-  (%)
-  (\|)
-  (&)
-  (^)
-  (~)
-  (mulw)
-  (addw)
-  (divmodw)
-  (intcblock uints)
-  (intc i)
-  (intc_0)
-  (intc_1)
-  (intc_2)
-  (intc_3)
-  (bytecblock bytess)
-  (bytec i)
-  (bytec_0)
-  (bytec_1)
-  (bytec_2)
-  (bytec_3)
-  (arg n)
-  (arg_0)
-  (arg_1)
-  (arg_2)
-  (arg_3)
-  (txn field)
-  (global field)
-  (gtxn group-index field)
-  (load i)
-  (store i)
-  (txna field array-index)
-  (gtxna group-index field array-index)
-  (gtxns field)
-  (gtxnsa field array-index)
-  (gload group-index i)
-  (gloads i)
-  (gaid group-index)
-  (gaids)
-  (loads)
-  (stores)
-  (bnz offset)
-  (bz offset)
-  (b offset)
-  (return)
-  (assert)
-  (pop)
-  (dup)
-  (dup2)
-  (dig n)
-  (swap)
-  (select)
-  (cover n)
-  (uncover n)
-  (concat)
-  (substring start end)
-  (substring3)
-  (getbit)
-  (setbit)
-  (getbyte)
-  (setbyte)
-  (extract start length)
-  (extract3)
-  (extract_uint16)
-  (extract_uint32)
-  (extract_uint64)
-  (balance)
-  (app_opted_in)
-  (app_local_get)
-  (app_local_get_ex)
-  (app_global_get)
-  (app_global_get_ex)
-  (app_local_put)
-  (app_global_put)
-  (app_local_del)
-  (app_global_del)
-  (asset_holding_get field)
-  (asset_params_get field)
-  (app_params_get field)
-  (min_balance)
-  (pushbytes bytes)
-  (pushint uint)
-  (callsub offset)
-  (retsub)
-  (shl)
-  (shr)
-  (sqrt)
-  (bitlen)
-  (exp)
-  (expw)
-  (b+)
-  (b-)
-  (b/)
-  (b*)
-  (b<)
-  (b>)
-  (b<=)
-  (b>=)
-  (b==)
-  (b!=)
-  (b%)
-  (b\|)
-  (b&)
-  (b^)
-  (b~)
-  (bzero)
-  (log)
-  (itxn_begin)
-  (itxn_field field)
-  (itxn_submit)
-  (itxn field)
-  (itxna field array-index)
-  (itxn_next)
-  (txnas field)
-  (gtxnas group-index field)
-  (gtxnsas field)
-  (args))
+
+
+
+
+
+#|
+
+
 
 (define instruction-name
   (sumtype-name Instruction))
@@ -646,7 +1006,8 @@
      (unit 6)]
     [(b~)
      (unit 4)]
-    [else
-     (unit 1)]))
+    #:otherwise _
+    (unit 1)))
 
 (provide instruction-cost)
+|#

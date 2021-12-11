@@ -116,6 +116,7 @@ the state space, so this should be a very brisk analysis.
 (require racket/match
          racket/set
          (only-in racket/list append-map)
+         (only-in racket/string string-join)
          "static/sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
@@ -169,8 +170,13 @@ the state space, so this should be a very brisk analysis.
 
 (define ((unit . xs) ς) (list (underway [values xs] ς)))
 (define ((return code) ς) (list (returned code
-                                          [constraints (hasheq 'OnCompletion (hash-ref ς 'OnCompletion)
-                                                               'RekeyTo      (hash-ref ς 'RekeyTo))])))
+                                          [constraints (hasheq 'OnCompletion    (hash-ref ς 'OnCompletion)
+                                                               'RekeyTo         (hash-ref ς 'RekeyTo)
+                                                               'ApplicationArgs (hash-ref ς 'ApplicationArgs (hasheqv))
+                                                               'tbh-assumptions (hash-ref ς 'tbh-assumptions (set))
+                                                               'tbh-refutations (hash-ref ς 'tbh-refutations (set))
+                                                               'assumptions     (hash-ref ς 'assumptions (set))
+                                                               'refutations     (hash-ref ς 'refutations (set)))])))
 (define ((panic template . args) ς) (list (failure! [message (apply format template args)])))
 
 (define ((>>= m f) ς)
@@ -260,8 +266,8 @@ the state space, so this should be a very brisk analysis.
                     [< (s 2 b<)]
                     [== (s 2 b==)])])
     (define (sif c t f)
-      (each (>> (refute c) t)
-            (>> (assume c) f)))
+      (each (>> (assume c) t)
+            (>> (refute c) f)))
     (define (contains? ? c)
       (if (? c)
         #t
@@ -270,6 +276,88 @@ the state space, so this should be a very brisk analysis.
            (ormap (λ (c) (contains? ? c)) cs)]
           [_
            #f])))
+    (define-syntax-rule (log-assumption property-name c)
+      (update tbh-assumptions (λ (cs) (set-add cs c)) (set)))
+    (define-syntax-rule (log-refutation property-name c)
+      (update tbh-refutations (λ (cs) (set-add cs c)) (set)))
+    (define interpretations
+      (list (list (sumtype-predicate i:OnCompletion)
+                  (match-lambda
+                    [(or `(== ,(i:OnCompletion) ,(? exact-nonnegative-integer? n))
+                         `(== ,(? exact-nonnegative-integer? n) ,(i:OnCompletion)))
+                     (>>= (get OnCompletion)
+                          (λ (oc₀)
+                            (let ([oc (set-intersect oc₀ (seteqv n))])
+                              (if (set-empty? oc)
+                                fail
+                                (put OnCompletion oc)))))]
+                    [c (log-assumption OnCompletion c)])
+                  (match-lambda
+                    [(or `(== ,(i:OnCompletion) ,(? exact-nonnegative-integer? n))
+                         `(== ,(? exact-nonnegative-integer? n) ,(i:OnCompletion)))
+                     (>>= (get OnCompletion)
+                          (λ (oc₀)
+                            (let ([oc (set-intersect oc₀ (set-subtract (seteqv 0 1 2 4 5) (seteqv n)))])
+                              (if (set-empty? oc)
+                                fail
+                                (put OnCompletion oc)))))]
+                    [c (log-refutation OnCompletion c)]))
+            (list (sumtype-predicate i:RekeyTo)
+                  (match-lambda
+                    [`(== ,(i:RekeyTo) ,(i:ZeroAddress))
+                     (>>= (get RekeyTo)
+                          (match-lambda
+                            [#f
+                             (put RekeyTo `(= ,(i:ZeroAddress)))]
+                            [`(= ,(i:ZeroAddress))
+                             (unit)]
+                            [`(≠ ,(i:ZeroAddress))
+                             fail]))]
+                    [c (log-assumption RekeyTo c)])
+                  (match-lambda
+                    [`(== ,(i:RekeyTo) ,(i:ZeroAddress))
+                     (>>= (get RekeyTo)
+                          (match-lambda
+                            [#f
+                             (put RekeyTo `(≠ ,(i:ZeroAddress)))]
+                            [`(= ,(i:ZeroAddress))
+                             fail]
+                            [`(≠ ,(i:ZeroAddress))
+                             (unit)]))]
+                    [c (log-refutation RekeyTo c)]))
+            (list (sumtype-predicate i:ApplicationArgs)
+                  (match-lambda
+                    [(or `(== (transaction-array ,(i:ApplicationArgs) ,(? exact-nonnegative-integer? i)) ,x)
+                         `(== ,x (transaction-array ,(i:ApplicationArgs) ,(? exact-nonnegative-integer? i))))
+                     (>>= (get ApplicationArgs (hasheqv))
+                          (λ (ApplicationArgs)
+                            (cond
+                              [(hash-ref ApplicationArgs i #f)
+                               => (λ (x₀)
+                                    (match* (x₀ x)
+                                      [(`(= ,z) z) (unit)]
+                                      [(`(= ,(? bytes?)) (? bytes?)) fail]
+                                      [(`(≠ ,z) z) fail]
+                                      [(`(≠ ,_) _) (unit)]))]
+                              [else
+                               (put ApplicationArgs (hash-set ApplicationArgs i `(= ,x)))])))]
+                    [c (log-assumption ApplicationArgs c)])
+                  (match-lambda
+                    [(or `(== (transaction-array ,(i:ApplicationArgs) ,(? exact-nonnegative-integer? i)) ,x)
+                         `(== ,x (transaction-array ,(i:ApplicationArgs) ,(? exact-nonnegative-integer? i))))
+                     (>>= (get ApplicationArgs (hasheqv))
+                          (λ (ApplicationArgs)
+                            (cond
+                              [(hash-ref ApplicationArgs i #f)
+                               => (λ (x₀)
+                                    (match* (x₀ x)
+                                      [(`(= ,z) z) fail]
+                                      [(`(= ,(? bytes?)) (? bytes?)) fail]
+                                      [(`(≠ ,z) z) (unit)]
+                                      [(`(≠ ,_) _) (unit)]))]
+                              [else
+                               (put ApplicationArgs (hash-set ApplicationArgs i `(≠ ,x)))])))]
+                    [c (log-refutation ApplicationArgs c)]))))
     (define assume
       (match-lambda
         [`(! ,c)
@@ -280,6 +368,8 @@ the state space, so this should be a very brisk analysis.
         [`(&& ,c₀ ,c₁)
          (>> (assume c₀)
              (assume c₁))]
+        [(? exact-nonnegative-integer? n)
+         (if (zero? n) fail (unit))]
         [`(== ,(? exact-nonnegative-integer? x)
               ,(? exact-nonnegative-integer? y))
          (if (= x y) (unit) fail)]
@@ -288,49 +378,14 @@ the state space, so this should be a very brisk analysis.
          (if (< x y) (unit) fail)]
         [c
          (cond
-           [(exact-nonnegative-integer? c)
-            (if (zero? c) fail (unit))]
-           [(contains? (sumtype-predicate i:OnCompletion) c)
-            (match c
-              [(or `(== ,(i:OnCompletion) ,(? exact-nonnegative-integer? n))
-                   `(== ,(? exact-nonnegative-integer? n) ,(i:OnCompletion)))
-               (>>= (get OnCompletion)
-                    (λ (oc₀)
-                      (let ([oc (set-intersect oc₀ (seteqv n))])
-                        (if (set-empty? oc)
-                          fail
-                          (put OnCompletion oc)))))]
-              [c
-               (put OnCompletion-unsound #t)])]
-           [(contains? (sumtype-predicate i:RekeyTo) c)
-            (match c
-              [`(== ,(i:RekeyTo) ,(i:ZeroAddress))
-               (>>= (get RekeyTo)
-                    (match-lambda
-                      [#f
-                       (put RekeyTo `(= ,(i:ZeroAddress)))]
-                      [`(= ,(i:ZeroAddress))
-                       (unit)
-                       #;
-                       (cond
-                         [(must-be-=? rt₀ (i:ZeroAddress))
-                          (unit)]
-                         [(may-be-=? rt₀ (i:ZeroAddress))
-                          (error 'RekeyTo "Does ZeroAddress refine ~a?" rt₀)]
-                         [else
-                          fail])]
-                      [`(≠ ,(i:ZeroAddress))
-                       fail
-                       #;
-                       (if (for/and ([rt (in-set rts)])
-                             (must-be-≠? rt (i:ZeroAddress)))
-                         (put RekeyTo (i:ZeroAddress))
-                         (error 'RekeyTo "Could ZeroAddress be in ~a?" rts))]))]
-              [c
-               (put RekeyTo-unsound #t)])]
+           [(ormap
+             (match-lambda
+               [(list ? interpretation _)
+                (and (contains? ? c) (interpretation c))])
+             interpretations)
+            => values]
            [else
-            (eprintf "ignoring constraint\n~a\n" c)
-            (unit)])]))
+            (update assumptions (λ (cs) (set-add cs c)) (set))])]))
     (define refute
       (match-lambda
         [`(! ,c)
@@ -341,6 +396,8 @@ the state space, so this should be a very brisk analysis.
         [`(&& ,c₀ ,c₁)
          (each (refute c₀)
                (refute c₁))]
+        [(? exact-nonnegative-integer? n)
+         (if (zero? n) (unit) fail)]
         [`(== ,(? exact-nonnegative-integer? x)
               ,(? exact-nonnegative-integer? y))
          (if (= x y) fail (unit))]
@@ -349,56 +406,23 @@ the state space, so this should be a very brisk analysis.
          (if (< x y) fail (unit))]
         [c
          (cond
-           [(exact-nonnegative-integer? c)
-            (if (zero? c) (unit) fail)]
-           [(contains? (sumtype-predicate i:OnCompletion) c)
-            (match c
-              [(or `(== ,(i:OnCompletion) ,(? exact-nonnegative-integer? n))
-                   `(== ,(? exact-nonnegative-integer? n) ,(i:OnCompletion)))
-               (>>= (get OnCompletion)
-                    (λ (oc₀)
-                      ; (set-intersect oc₀ (set-complement (seteq 0 1 2 4 5) (set n)))
-                      (let ([oc (set-subtract oc₀ (seteqv n))])
-                        (if (set-empty? oc)
-                          fail
-                          (put OnCompletion oc)))))]
-              [c
-               (put OnCompetion-unsound #t)])]
-           [(contains? (sumtype-predicate i:RekeyTo) c)
-            (match c
-              [`(== ,(i:RekeyTo) ,(i:ZeroAddress))
-               (>>= (get RekeyTo)
-                    (match-lambda
-                      [#f
-                       (put RekeyTo `(≠ ,(i:ZeroAddress)))]
-                      [`(= ,(i:ZeroAddress))
-                       fail
-                       #;
-                       (cond
-                         [(must-be-≠? rt₀ (i:ZeroAddress))
-                          (unit)]
-                         [(may-be-≠? rt₀ (i:ZeroAddress))
-                          (error 'RekeyTo "Does ZeroAddress refine ~a?" rt₀)]
-                         [else
-                          fail])]
-                      [`(≠ ,(i:ZeroAddress))
-                       (unit)
-                       #;
-                       (if (for/and ([rt (in-set rts)])
-                             (must-be-≠? rt (i:ZeroAddress)))
-                         (put RekeyTo (i:ZeroAddress))
-                         (error 'RekeyTo "Could ZeroAddress be in ~a?" rts))]))]
-              [c
-               (put RekeyTo-unsound #t)
-               (unit)])]
+           [(ormap
+             (match-lambda
+               [(list ? _ interpretation)
+                (and (contains? ? c) (interpretation c))])
+             interpretations)
+            => values]
            [else
-            (eprintf "ignoring constraint\n~a\n" c)
-            (unit)])]))
+            (update refutations (λ (cs) (set-add cs c)) (set))])]))
+    (define (logic-value x)
+      (if (exact-nonnegative-integer? x)
+        (if (zero? x) 0 1)
+        `(! (! ,x))))
     (VM monad+
         read-byte
         logic-sig-version
         panic
-        return
+        [return (λ (code) (sif code (return 1) (return 0)))]
         [in-mode
          (λ (target-mode info)
            (>>= (get mode #f)
@@ -465,9 +489,35 @@ the state space, so this should be a very brisk analysis.
         [expw (s 2 expw0 expw1)]
         [shl (s 2 shl)]
         [shr (s 2 shr)]
-        [is-zero (λ (c) (sif c (unit #t) (unit #f)))]
-        [&& (s 2 &&)]
-        [\|\| (s 2 \|\|)]
+        [is-zero (λ (c) (sif c (unit #f) (unit #t)))]
+        [&& 
+         (λ (x y)
+           (let ([lx (logic-value x)]
+                 [ly (logic-value y)])
+             (cond
+               [(or (equal? lx 0)
+                    (equal? ly 0))
+                (unit 0)]
+               [(equal? lx 1)
+                (unit ly)]
+               [(equal? ly 1)
+                (unit lx)]
+               [else
+                (unit `(&& ,x ,y))])))]
+        [\|\|
+         (λ (x y)
+           (let ([lx (logic-value x)]
+                 [ly (logic-value y)])
+             (cond
+               [(or (equal? lx 1)
+                    (equal? ly 1))
+                (unit 1)]
+               [(equal? lx 0)
+                (unit ly)]
+               [(equal? ly 0)
+                (unit lx)]
+               [else
+                (unit `(\|\| ,x ,y))])))]
         [concat (s 2 concat)]
         [substring (s 3 substring)]
         [getbyte (s 2 getbyte)]
@@ -479,7 +529,8 @@ the state space, so this should be a very brisk analysis.
         [bitlen (s 1 bitlen)]
         [bzero (s 1 bzero)]
         bytes-alu
-        [global
+        [global unit
+        #;
          (sumtype-case-lambda i:GlobalField
            [(i:GroupSize)
             (let loop ([n 16])
@@ -566,7 +617,9 @@ the state space, so this should be a very brisk analysis.
                                                     (sumtype-case Result r
                                                       [(underway [values (list)] ς)
                                                        (values (cons ς todo) final)]
-                                                      [(returned)
+                                                      [(returned code constraints)
+                                                       (unless (exact-nonnegative-integer? code)
+                                                         (raise code))
                                                        (values todo (set-add final r))]
                                                       [(failure! message)
                                                        #;(displayln message)
@@ -575,10 +628,171 @@ the state space, so this should be a very brisk analysis.
                   (fk "exceeded ~a states" capacity)))))
           fk))
 
+#|
+
+first, report on the cases when OnCompletion is not constrained and when RekeyTo is not constrained
+report from least to most constrained.
+remember to include whether an unknown property exists
+
+next, report on the cases in which an unknown property exists.
+don't overlap with the first report, so remove those from the candidate set.
+
+then talk about the other states, if a full report is desired.
+
+don't order by property but by how unconstrained they are, so talk about unconstrained RekeyTo before
+reporting on entirely-constrained OnCompletion (or any other property).
+but the relative ordering of properties may be immaterial.
+
+
+|#
+
 (module+ main
   (require racket/pretty
            "../test/algoexplorer/extract.rkt")
-  (for/sum ([path (in-list (vector->list (current-command-line-arguments)))])
+  (for ([path (in-list (vector->list (current-command-line-arguments)))])
     (let ([bytecode (file-extract path 'approval-program)])
-      (displayln path)
-      (analyze bytecode (λ (final) 1) (λ (template . args) (eprintf "~a\n" (apply format template args)) 0)))))
+      #;(displayln path)
+      (analyze bytecode
+               (λ (finals)
+                 (define quantity-description
+                   (match-lambda
+                     [(? exact-nonnegative-integer? n)
+                      (number->string n)]
+                     [(? bytes? bs)
+                      (bytes->string/utf-8 bs)]
+                     [(? (sumtype-predicate i:GlobalField) f)
+                      (i:global-field-name f)]
+                     [(? (sumtype-predicate i:TransactionField) f)
+                      (i:transaction-field-name f)]
+                     [`(group-transaction ,(? exact-nonnegative-integer? i) ,f)
+                      (format "txns[~a].~a" i (i:transaction-field-name f))]
+                     [`(app-global-get ,(? bytes? key))
+                      (format "globals['~a']" key)]
+                     [`(+ ,x ,y)
+                      (string-append (quantity-description x)
+                                     " plus "
+                                     (quantity-description y))]))
+                 (define assumption-description
+                   (match-lambda
+                     [`(== ,x ,y)
+                      (string-append (quantity-description x)
+                                     " is "
+                                     (quantity-description y))]))
+                 (define refutation-description
+                   (match-lambda
+                     [`(== ,x ,y)
+                      (string-append (quantity-description x)
+                                     " is not "
+                                     (quantity-description y))]))
+                 (define (report c ps)
+                   (displayln "Possible outcome:\n")
+                   (for ([(p is-unconstrained?) (in-hash ps)])
+                     (when (is-unconstrained? c)
+                       (printf "~a is NOT constrained\n" p)))
+                   #;
+                   (let ([oc (hash-ref c 'OnCompletion)])
+                     (cond
+                       [(= (set-count oc) 5)
+                        (displayln "is NOT constrained")]
+                       [(> (set-count oc) 2)
+                        (let ([oc (set-subtract (seteqv 0 1 2 4 5) oc)])
+                          (printf "is constrained NOT to be ~a\n"
+                                  (match (map number->string (set->list oc))
+                                    [(list x) x]
+                                    [(list x y) (string-append x " or " y)]
+                                    [xs (string-join xs ", " #:before-last ", or ")])))]
+                       [else
+                        (printf "is constrained to be ~a\n"
+                                (match (map number->string (set->list oc))
+                                  [(list x) x]
+                                  [(list x y) (string-append x " or " y)]
+                                  [xs (string-join xs ", " #:before-last ", or ")]))]))
+                   #;
+                   (match (hash-ref c 'RekeyTo)
+                     [#f
+                      (displayln "is NOT constrained")]
+                     [(i:ZeroAddress)
+                      (displayln "is constrained to be the zero address")])
+                   (let ([assumptions (hash-ref c 'assumptions)]
+                         [refutations (hash-ref c 'refutations)])
+                     (unless (and (set-empty? assumptions)
+                                  (set-empty? refutations))
+                       (displayln "\nwhen\n")
+                       (for ([c (in-set assumptions)])
+                         (display "  ")
+                         (displayln (assumption-description c)))
+                       (for ([c (in-set refutations)])
+                         (display "  ")
+                         (displayln (refutation-description c)))))
+                   (let ([assumptions (hash-ref c 'tbh-assumptions)]
+                         [refutations (hash-ref c 'tbh-refutations)])
+                     (unless (and (set-empty? assumptions)
+                                  (set-empty? refutations))
+                       (displayln "\nbut it may be that\n")
+                       (for ([c (in-set assumptions)])
+                         (display "  ")
+                         (displayln (assumption-description c)))
+                       (for ([c (in-set refutations)])
+                         (display "  ")
+                         (displayln (refutation-description c)))
+                       (displayln "\nwhich may undermine the analysis of this possible outcome"))))
+                 (define (find-max cs ps)
+                   (for/fold ([max-c #f]
+                              [max-c-count 0])
+                             ([c (in-set cs)])
+                     (let ([c-count (for/sum ([(p is-unconstrained?) (in-hash ps)])
+                                    (if (is-unconstrained? c) 1 0))])
+                       (if (>= c-count max-c-count)
+                         (values c c-count)
+                         (values max-c max-c-count)))))
+                 (let ([cs (for/fold ([cs (set)])
+                                     ([r (in-set finals)])
+                             (match-let ([(returned code constraints) r])
+                               (if (zero? code)
+                                 cs
+                                 (set-add cs constraints))))])
+                          ; 1. report any properties that are never constrained
+                          ;    remove those properties from the rest of the report
+                   (let* ([ps (let ([ps (hasheq 'RekeyTo (λ (c) (not (hash-ref c 'RekeyTo #f)))
+                                                'OnCompletion (λ (c) (= (set-count (hash-ref c 'OnCompletion (seteq 0 1 2 4 5))) 5)))])
+                                (for/fold ([ps ps]) ([(p is-unconstrained?) (in-hash ps)])
+                                  (cond
+                                    [(for/and ([c (in-set cs)])
+                                       (is-unconstrained? c))
+                                     (printf "~a is NOT constrained AT ALL in any outcome\n" p)
+                                     (hash-remove ps p)]
+                                    [else
+                                     ps])))]
+                          ; 2. report states that have at least one unconstrained property, ordered by the number of such
+                          ;    properties they have.
+                          ;    report on tbh assumptions/refutations
+                          ;    remove such states from the set
+                          [cs (let loop ([cs cs])
+                                (let-values ([(c c-count) (find-max cs ps)])
+                                  (if (zero? c-count)
+                                    cs
+                                    (begin
+                                      (report c ps)
+                                      (loop (set-remove cs c))))))]
+                          ; 3. report states that have tbh assumptions/refutations
+                          ;    remove such states from the set
+                          [cs (for/fold ([cs cs])
+                                        ([c (in-set cs)])
+                                (if (and (set-empty? (hash-ref c 'tbh-assumptions))
+                                         (set-empty? (hash-ref c 'tbh-refutations)))
+                                  cs
+                                  (begin
+                                    (displayln "some missing assumptions/refutations")
+                                    (set-remove cs c))))])
+                     (printf "There ~a ~a remaining discovered possible outcome~a.\n"
+                             (if (= (set-count cs) 1) "is" "are")
+                             (set-count cs)
+                             (if (= (set-count cs) 1) "" "s")))))
+               (λ (template . args)
+                 (printf #<<MESSAGE
+Unable to analyze TEAL program:
+
+  ~a
+
+MESSAGE
+                            (apply format template args)))))))

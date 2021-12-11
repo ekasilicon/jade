@@ -1,42 +1,16 @@
 #lang racket/base
-(require racket/match
-         racket/set
+(require (except-in racket/match ==)
          (only-in racket/list append-map)
+         "static/object.rkt"
          "static/sumtype.rkt"
-         "static/sumtype-extra.rkt"
          "monad.rkt"
-         "read-byte.rkt"
-         "logic-sig-version.rkt"
-         "arithmetic-logic-unit.rkt"
-         "internal-transaction.rkt"
-         "prefix.rkt"
-         "vm.rkt"
-         (prefix-in i: "instruction.rkt"))
+         "instruction.rkt"
+         "vm.rkt")
 
 (define-sumtype Result
   (underway values ς)
   (failure! message)
   (returned code))
-
-(define ((unit . xs) ς) (list (underway [values xs] ς)))
-(define ((>>= m f) ς)
-  (append-map
-   (sumtype-case-lambda Result
-     [(underway [values xs] ς)
-      ((apply f xs) ς)]
-     #:otherwise r
-     (list r))
-   (m ς)))
-
-(define ((return code) ς)
-  (list (returned code)))
-(define ((panic template . args) ς)
-  (list (failure! [message (apply format template args)])))
-
-(define standard-Monad (Monad unit >>=))
-
-(define standard-Monad+ (Monad+ [monad standard-Monad]
-                                [mplus (λ ms (λ (ς) (append-map (λ (m) (m ς)) ms)))]))
 
 ; get : key -> Standard a
 (define-syntax get
@@ -56,7 +30,48 @@
     [(_ key f iv)
      (λ (ς) (list (underway [values (list)] [ς (hash-update ς 'key f iv)])))]))
 
-(require "unimplemented.rkt")
+(define vm
+  (fix (mix (vm/version 1)
+            (inc (panic
+                  unit >>= >>)
+                 [sha256 (λ (x) (raise x) (unit `(sha256 ,x)))]
+                 [panic
+                  (λ (template . args)
+                    (λ (ς)
+                      (list (failure! [message (apply format template args)]))))]
+                 [check-final
+                  (unit)]
+                 [push
+                  (λ (x) (update stack (λ (stk) (cons x stk))))]
+                 [pop
+                  (>>= (get stack)
+                       (match-lambda
+                         [(cons x stk)
+                          (>> (put stack stk)
+                              (unit x))]
+                         [(list)
+                          (panic "tried to pop an empty stack")]))])
+            (read/version 1)
+            (inc (unit)
+                 [read-byte (unit 1)])
+            (inc (unit)
+                 [logic-sig-version (unit 1)])
+            monad+-extras
+            (inc ()
+                 [mplus
+                  (λ ms (λ (ς) (apply append (map (λ (m) (m ς)) ms))))])
+            monad-extras
+            (inc ()
+                 [unit (λ values (λ (ς) (list (underway values ς))))]
+                 [>>= (λ (m f)
+                        (λ (ς)
+                          (append-map
+                           (sumtype-case-lambda Result
+                             [(underway [values xs] ς)
+                              ((apply f xs) ς)]
+                             #:otherwise r (list r))
+                           (m ς))))]))))
+
 
 (define-syntax p
   (syntax-rules ()
@@ -578,3 +593,7 @@ MESSAGE
                         )
           (analyze/json-package (call-with-input-file filename port->bytes) (hasheq))))
       filenames)]))
+
+
+((vm 'step)
+ (hasheq 'stack (list))) 

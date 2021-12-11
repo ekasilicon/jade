@@ -4,25 +4,19 @@
          "read-byte.rkt")
 
 ; bytes? -> (cons a bytes?) | #f
-
-; instance Monad Prefix
-(define prefix-Monad
-  (Monad [unit (λ (a) (λ (bs) (cons a bs)))]
-         [>>= (λ (m f)
-                (λ (bs)
-                  (match (m bs)
-                    [(cons x bs) ((f x) bs)]
-                    [#f #f])))]))
-
 (define prefix-ReadByte
-  (ReadByte [monad prefix-Monad]
+  (ReadByte [unit (λ (a) (λ (bs) (cons a bs)))]
+            [>>= (λ (m f)
+                   (λ (bs)
+                     (match (m bs)
+                       [(cons x bs) ((f x) bs)]
+                       [#f #f])))]
             [read-byte (λ (bs)
                          (if (zero? (bytes-length bs))
                            #f
                            (cons (bytes-ref bs 0) (subbytes bs 1))))]))
 
-(provide prefix-Monad
-         prefix-ReadByte)
+(provide prefix-ReadByte)
 
 (module+ main
   ((read-varuint prefix-ReadByte) (bytes 127 1 2 3))

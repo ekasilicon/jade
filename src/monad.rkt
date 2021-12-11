@@ -1,21 +1,33 @@
 #lang racket/base
 (require racket/match
-         "static/record.rkt")
+         "static/object.rkt")
 
+(define monad-extras
+  (inc (>>=)
+       [>> (λ (m . ms) (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms))]))
+
+(define monad+-extras
+  (inc (mplus)
+       [mzero (mplus)]))
+
+(provide monad-extras monad+-extras)
+
+#|
 (record Monad (unit >>=))
 
-(define (>> m)
+(define (derive->> m)
   (match-define (Monad >>=) m)
-  (λ (m . ms) (foldl (λ (m m₀) (>>= m₀ (λ _ m))) m ms)))
+
 
 (provide Monad
-         >>)
+         derive->>)
 
-(record Monad+ (monad mplus))
+(record Monad+ Monad (mplus))
 
-(define (mzero m+)
+(define (derive-mzero m+)
   (match-define (Monad+ mplus) m+)
   (mplus))
 
 (provide Monad+
-         mzero)
+         derive-mzero)
+|#

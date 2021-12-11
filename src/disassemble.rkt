@@ -82,7 +82,8 @@
            [(i:callsub offset)
             (>>= (offset→destination offset)
                  (λ (dst) (unit (i:callsub [offset dst]))))]
-           [else (unit instr)]))))
+           #:otherwise instr
+           (unit instr)))))
 
 (define disassemble-instruction-stream
   (>>= position
@@ -125,6 +126,64 @@
 
 (provide (sumtype-out Directive))
 
+(define instruction-line
+  (sumtype-case-lambda i:Instruction
+    #:otherwise _
+    "  instruction"))
+
+(define directive-line
+  (sumtype-case-lambda Directive
+    [(i:Instruction instr)
+     (instruction-line instr)]
+    [(pragma content)
+     (format "#pragma ~a" content)]
+    [(label ℓ)
+     (format "~a:" ℓ)]))
+
+(provide directive-line)
+
+#;
+(define-syntax instruction-parser
+  (syntax-parser
+    [_
+     (match-let ([(sumtype-info variants) (syntax-local-value #'Directive)])
+       (with-syntax ([(parser ...)
+                      (map
+                       (λ (variant)
+                         (match-let ([(record-info fields _ constructor _ _ _) (syntax-local-value variant)])
+                           (with-syntax ([name (symbol->string (syntax->datum variant))]
+                                         [constructor constructor]
+                                         [(field ...) (map
+                                                        (λ (field)
+                                                          (match field
+                                                            ['v #'guarded-uint8]
+                                                            ['i #'guarded-uint8]
+                                                            ['n #'guarded-uint8]
+                                                            ['uints #'(p* (>> whitespace* varuint))]
+                                                            ['bytess #'(p* (>> whitespace* pbytes))]
+                                                            ['group-index #'guarded-uint8]
+                                                            ['array-index #'guarded-uint8]
+                                                            ['offset #'guarded-label]
+                                                            ['start #'guarded-uint8]
+                                                            ['end #'guarded-uint8]
+                                                            ['length #'guarded-uint8]
+                                                            ['bytes #'guarded-pbytes]
+                                                            ['uint #'guarded-varuint]
+                                                            ['field
+                                                             (match (syntax->datum variant)
+                                                               [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas)
+                                                                #'transaction-field]
+                                                               ['global #'global-field]
+                                                               ['asset_holding_get #'asset-holding-field]
+                                                               ['asset_params_get #'asset-params-field]
+                                                               ['app_params_get #'app-params-field])]
+                                                            ))
+                                                        fields)])
+                             #'(make-instruction name constructor field ...))))
+                       variants)])
+         #'(∨ parser ...)))]))
+
+
 (define (state→assembly state)
   (cons (pragma [content (format "version ~a" (hash-ref state 'logic-sig-version))])
         (let ([instrs (hash-ref state 'instructions)]
@@ -155,8 +214,7 @@
                                      (add-destination dst)]
                                     [(i:callsub [offset dst])
                                      (add-destination dst)]
-                                    [else
-                                     dsts]))]))]
+                                    #:otherwise _ dsts))]))]
                  [dsts (for/hash ([dst (in-list (sort (set->list dsts) <))]
                                   [i (in-naturals)])
                          (values dst (string->symbol (format "label~a" i))))])
@@ -174,8 +232,8 @@
                                         (i:bnz [offset (hash-ref dsts dst)])]
                                        [(i:callsub [offset dst])
                                         (i:callsub [offset (hash-ref dsts dst)])]
-                                       [else
-                                        instr])
+                                       #:otherwise instr
+                                       instr)
                                      (loop next-i))])])
                 (cond
                   [(hash-ref dsts i #f)
@@ -241,8 +299,8 @@
               (terminal instr)]
              [(i:return)
               (terminal instr)]
-             [else
-              (void)])
+             #:otherwise _
+             (void))
            (loop next-i)]
           [`(done)
            (void)]))
