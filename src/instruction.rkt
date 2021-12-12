@@ -113,10 +113,10 @@
         unit >>=)
        [instruction-logic-signature-version
         (sumtype-case-lambda Instruction1
-          #:otherwise _ 1)]
+          #:otherwise (λ (_) 1))]
        [instruction-name
         (sumtype-case-lambda Instruction1
-          #:otherwise _ "Instruction1")]
+          #:otherwise (λ (_) "Instruction1"))]
        [read-instruction
         (>>= read-opcode decode-instruction)]
        [decode-instruction
@@ -178,19 +178,45 @@
         (>>= read-uint8 decode-transaction-field)]
        [decode-transaction-field
         (match-lambda
-          [bc (error 'decode-transaction-field "fill this in (1)")]
+          [0  (unit (Sender))]
+          [1  (unit (Fee))]
+          [2  (unit (FirstValid))]
+          [3  (unit (FirstValidTime))]
+          [4  (unit (LastValid))]
+          [5  (unit (Note))]
+          [6  (unit (Lease))]
+          [7  (unit (Receiver))]
+          [8  (unit (Amount))]
+          [9  (unit (CloseRemainderTo))]
+          [10 (unit (VotePK))]
+          [11 (unit (SelectionPK))]
+          [12 (unit (VoteFirst))]
+          [13 (unit (VoteLast))]
+          [14 (unit (VoteKeyDilution))]
+          [15 (unit (Type))]
+          [16 (unit (TypeEnum))]
+          [17 (unit (XferAsset))]
+          [18 (unit (AssetAmount))]
+          [19 (unit (AssetSender))]
+          [20 (unit (AssetReceiver))]
+          [21 (unit (AssetCloseTo))]
+          [22 (unit (GroupIndex))]
+          [23 (unit (TxID))]
           [bc ((super decode-transaction-field) bc)])]
        [read-global-field
         (>>= read-uint8 decode-global-field)]
        [decode-global-field
         (match-lambda
-          [bc (error 'decode-global-field "fill this in (1)")]
+          [0  (unit (MinTxnFee))]
+          [1  (unit (MinBalance))]
+          [2  (unit (MaxTxnLife))]
+          [3  (unit (ZeroAddress))]
+          [4  (unit (GroupSize))]
           [bc ((super decode-global-field) bc)])]))
 
 (provide (sumtype-out Instruction1)
          (sumtype-out TransactionField1)
-         (sumtype-out GlobalField1)
-         read1)
+         (sumtype-out GlobalField1))
 
 (define-sumtype TransactionField2
   TransactionField1
@@ -252,6 +278,10 @@
   (asset_holding_get field)
   (asset_params_get field))
 
+(define-sumtype AssetHoldingField
+  (AssetBalance)
+  (AssetFrozen))
+
 (define read2
   (inc (read-transaction-field read-global-field
         read-uint8 read-offset read-bytes read-varuint
@@ -260,7 +290,12 @@
         (sumtype-case-lambda Instruction2
           [(Instruction1 instr) 
            ((super instruction-logic-signature-version) instr)]
-          #:otherwise _ 2)]
+          #:otherwise (λ (_) 2))]
+       [instruction-name
+        (sumtype-case-lambda Instruction2
+          [(Instruction1 instr)
+           ((super instruction-name) instr)]
+          #:otherwise (λ (_) "Instruction2"))]
        [decode-instruction
         (match-lambda
           [#x1e (unit (addw))]
@@ -291,14 +326,44 @@
           [oc   ((super decode-instruction) oc)])]
        [decode-transaction-field
         (match-lambda
-          [bc (error 'decode-transaction-field "fill this in (2)")]
+          [24 (unit (ApplicationID))]
+          [25 (unit (OnCompletion))]
+          [26 (unit (ApplicationArgs))]
+          [27 (unit (NumAppArgs))]
+          [28 (unit (Accounts))]
+          [29 (unit (NumAccounts))]
+          [30 (unit (ApprovalProgram))]
+          [31 (unit (ClearStateProgram))]
+          [32 (unit (RekeyTo))]
+          [33 (unit (ConfigAsset))]
+          [34 (unit (ConfigAssetTotal))]
+          [35 (unit (ConfigAssetDecimals))]
+          [36 (unit (ConfigAssetDefaultFrozen))]
+          [37 (unit (ConfigAssetUnitName))]
+          [38 (unit (ConfigAssetName))]
+          [39 (unit (ConfigAssetURL))]
+          [40 (unit (ConfigAssetMetadataHash))]
+          [41 (unit (ConfigAssetManager))]
+          [42 (unit (ConfigAssetReserve))]
+          [43 (unit (ConfigAssetFreeze))]
+          [44 (unit (ConfigAssetClawback))]
+          [45 (unit (FreezeAsset))]
+          [46 (unit (FreezeAssetAccount))]
+          [47 (unit (FreezeAssetFrozen))]
           [bc ((super decode-transaction-field) bc)])]
        [decode-global-field
-        (match-lambda)]
+        (match-lambda
+          [5  (unit (LogicSigVersion))]
+          [6  (unit (Round))]
+          [7  (unit (LatestTimestamp))]
+          [8  (unit (CurrentApplicationID))]
+          [bc ((super decode-global-field) bc)])]
        [read-asset-holding-field
         (>>= read-uint8 decode-asset-holding-field)]
        [decode-asset-holding-field
-        (match-lambda)]
+        (match-lambda
+          [0 (unit (AssetBalance))]
+          [1 (unit (AssetFrozen))])]
        [read-asset-params-field
         (>>= read-uint8 decode-asset-params-field)]
        [decode-asset-params-field
@@ -306,8 +371,7 @@
 
 (provide (sumtype-out Instruction2)
          (sumtype-out TransactionField2)
-         (sumtype-out GlobalField2)
-         read2)
+         (sumtype-out GlobalField2))
 
 (define-sumtype TransactionField3
   TransactionField2
@@ -343,6 +407,16 @@
   (inc (read-transaction-field read-global-field
         read-uint8 read-offset read-bytes read-varuint
         unit >>=)
+       [instruction-logic-signature-version
+        (sumtype-case-lambda Instruction3
+          [(Instruction2 instr) 
+           ((super instruction-logic-signature-version) instr)]
+          #:otherwise (λ (_) 3))]
+       [instruction-name
+        (sumtype-case-lambda Instruction3
+          [(Instruction2 instr)
+           ((super instruction-name) instr)]
+          #:otherwise (λ (_) "Instruction3"))]
        [decode-instruction
         (match-lambda
           [#x31 (>>= read-transaction-field (λ (field) (unit (txn field))))]
@@ -367,13 +441,23 @@
           [oc   ((super decode-instruction) oc)])]
        [decode-transaction-field
         (match-lambda
-          [bc (error 'decode-transaction-field "fill this in (3)")]
-          [bc ((super decode-transaction-field) bc)])]))
+          [48 (unit (Assets))]
+          [49 (unit (NumAssets))]
+          [50 (unit (Applications))]
+          [51 (unit (NumApplications))]
+          [52 (unit (GlobalNumUint))]
+          [53 (unit (GlobalNumByteSlice))]
+          [54 (unit (LocalNumUint))]
+          [55 (unit (LocalNumByteSlice))]
+          [bc ((super decode-transaction-field) bc)])]
+       [decode-global-field
+        (match-lambda
+          [9  (unit (CreatorAddress))]
+          [bc ((super decode-global-field) bc)])]))
 
 (provide (sumtype-out Instruction3)
          (sumtype-out TransactionField3)
-         (sumtype-out GlobalField3)
-         read3)
+         (sumtype-out GlobalField3))
 
 (define-sumtype TransactionField4
   TransactionField3
@@ -417,6 +501,16 @@
 (define read4
   (inc (read-uint8 read-offset
         unit >>=)
+       [instruction-logic-signature-version
+        (sumtype-case-lambda Instruction4
+          [(Instruction3 instr) 
+           ((super instruction-logic-signature-version) instr)]
+          #:otherwise (λ (_) 4))]
+       [instruction-name
+        (sumtype-case-lambda Instruction4
+          [(Instruction3 instr)
+           ((super instruction-name) instr)]
+          #:otherwise (λ (_) "Instruction4"))]
        [decode-instruction
         (match-lambda
           [#x1f (unit (divmodw))]
@@ -451,13 +545,12 @@
           [oc   ((super decode-instruction) oc)])]
        [decode-transaction-field
         (match-lambda
-          [bc (error 'decode-transaction-field "fill this in (4)")]
+          [56 (unit (ExtraProgramPages))]
           [bc ((super decode-transaction-field) bc)])]))
 
 (provide (sumtype-out Instruction4)
          (sumtype-out TransactionField4)
-         (sumtype-out GlobalField4)
-         read4)
+         (sumtype-out GlobalField4))
 
 (define-sumtype TransactionField5
   TransactionField4
@@ -468,7 +561,9 @@
   (CreatedApplicationID))
 
 (define-sumtype GlobalField5
-  GlobalField4)
+  GlobalField4
+  (CurrentApplicationAddress)
+  (GroupID))
 
 (define-sumtype Instruction5
   Instruction4
@@ -500,6 +595,16 @@
   (inc (read-transaction-field
         read-uint8
         unit >>=)
+       [instruction-logic-signature-version
+        (sumtype-case-lambda Instruction5
+          [(Instruction4 instr)
+           ((super instruction-logic-signature-version) instr)]
+          #:otherwise (λ (_) 5))]
+       [instruction-name
+        (sumtype-case-lambda Instruction5
+          [(Instruction4 instr)
+           ((super instruction-name) instr)]
+          #:otherwise (λ (_) "Instruction5"))]
        [decode-instruction
         (match-lambda
           [#x05 (>>= read-uint8 (λ (v) (unit (ecdsa_verify v))))]
@@ -528,8 +633,17 @@
           [oc   ((super decode-instruction) oc)])]
        [decode-transaction-field
         (match-lambda
-          [bc (error 'decode-transaction-field "fill this in (5)")]
+          [57 (unit (Nonparticipation))]
+          [58 (unit (Logs))]
+          [59 (unit (NumLogs))]
+          [60 (unit (CreatedAssetID))]
+          [61 (unit (CreatedApplicationID))]
           [bc ((super decode-transaction-field) bc)])]
+       [decode-global-field
+        (match-lambda
+          [10 (unit (CurrentApplicationAddress))]
+          [11 (unit (GroupID))]
+          [bc ((super decode-global-field) bc)])]
        [read-app-params-field
         (>>= read-uint8 decode-app-params-field)]
        [decode-app-params-field
@@ -537,8 +651,7 @@
 
 (provide (sumtype-out Instruction5)
          (sumtype-out TransactionField5)
-         (sumtype-out GlobalField5)
-         read5)
+         (sumtype-out GlobalField5))
 
 (define-sumtype TransactionField6
   TransactionField5)
@@ -552,6 +665,16 @@
 
 (define read6
   (inc (unit)
+       [instruction-logic-signature-version
+        (sumtype-case-lambda Instruction6
+          [(Instruction5 instr)
+           ((super instruction-logic-signature-version) instr)]
+          #:otherwise (λ (_) 6))]
+       [instruction-name
+        (sumtype-case-lambda Instruction6
+          [(Instruction5 instr)
+           ((super instruction-name) instr)]
+          #:otherwise (λ (_) "Instruction6"))]
        [decode-instruction
         (match-lambda
           [#xb6 (unit (itxn_next))]
@@ -559,8 +682,7 @@
 
 (provide (sumtype-out Instruction6)
          (sumtype-out TransactionField6)
-         (sumtype-out GlobalField6)
-         read6)
+         (sumtype-out GlobalField6))
 
 (define (read/version v)
   (if (and (exact-nonnegative-integer? v)
@@ -670,9 +792,6 @@
          read-global-field
          global-field-logic-signature-version)
 
-(define-sumtype AssetHoldingField
-  (AssetBalance)
-  (AssetFrozen))
 
 (define asset-holding-field
   (index→enumtype AssetHoldingField))

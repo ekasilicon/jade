@@ -124,7 +124,7 @@
                                       stx)))])]
        [else
         (raise-syntax-error 'sumtype-case "not a declared sumtype" #'type)])]
-    [(_ type:id e vc:variant-clause ... #:otherwise x:id else-body ...)
+    [(_ type:id e vc:variant-clause ... #:otherwise f)
      (match (syntax-local-value #'type (λ () #f))
        [(sumtype-info variants _)
         (with-syntax ([(rest-variant ...) (variants-subtract* variants #'(vc.variants ...))])
@@ -132,7 +132,7 @@
               vc.clause ...
               ; make sure that else clause checks the rest of variants
               [(and (or (rest-variant) ...) x)
-               else-body ...]
+               (f x)]
               [v
                (error 'sumtype-case "~v not a variant of ~a" v 'type)]))]
        [_
@@ -174,7 +174,7 @@
 
   (check-equal? (sumtype-case Test (a)
                   [(a) 10]
-                  #:otherwise b 20)
+                  #:otherwise (λ (b) 20))
                 10)
 
   (define-sumtype Test2
@@ -212,7 +212,7 @@
   (check-exn #rx"not a variant"
              (λ ()
                (sumtype-case Test (e)
-                 #:otherwise _ 42)))
+                 #:otherwise (λ (_) 42))))
 
   (define-sumtype P1 a b c)
   (define-sumtype P2 d e f)
@@ -243,8 +243,8 @@
                    "a, c, or e"]
                   [(Q2′ _)
                    "b or d"]
-                  #:otherwise _
-                  "something else")
+                  #:otherwise
+                  (λ (_) "something else"))
                 "a, c, or e")
 
   (check-equal? ((sumtype-predicate a) (a))

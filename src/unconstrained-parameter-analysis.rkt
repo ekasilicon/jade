@@ -24,8 +24,7 @@
    (sumtype-case-lambda Result
      [(underway [values xs] ς)
       ((apply f xs) ς)]
-     #:otherwise r
-     (list r))
+     #:otherwise list)
    (m ς)))
 
 (define ((return code) ς)
@@ -307,8 +306,8 @@
           [(i:ApplicationID i:NumAppArgs i:NumAccounts i:RekeyTo)
            (>> ((logic-sig-version>= standard-VM) 2 (i:transaction-field-name f))
                (unit f))]
-          #:otherwise f
-          (error 'transaction "handle case for ~a" f)))]
+          #:otherwise
+          (λ (f) (error 'transaction "handle case for ~a" f))))]
      [group-transaction
       (λ (gi f)
         (unit `(txn-property ,gi ,f)))]
@@ -332,8 +331,8 @@
           [(i:CurrentApplicationAddress i:GroupID)
            (>> ((logic-sig-version>= standard-VM) 5 (i:global-field-name f))
                (unit f))]
-          #:otherwise f
-          (error 'global "handle case for ~a" f)))]
+          #:otherwise
+          (λ (f) (error 'global "handle case for ~a" f))))]
      [balance
       (p balance 1)
       #;

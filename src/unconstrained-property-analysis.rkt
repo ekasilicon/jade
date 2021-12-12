@@ -184,8 +184,7 @@ the state space, so this should be a very brisk analysis.
    (sumtype-case-lambda Result
      [(underway [values xs] ς)
       ((apply f xs) ς)]
-     #:otherwise r
-     (list r))
+     #:otherwise list)
    (m ς)))
 
 (define monad (Monad unit >>=))
@@ -538,7 +537,7 @@ the state space, so this should be a very brisk analysis.
                 fail
                 (each (unit n)
                       (loop (sub1 n)))))]
-           #:otherwise f (unit f))]
+           #:otherwise unit)]
         [transaction unit]
         [group-transaction (s 2 group-transaction)]
         [transaction-array (s 2 transaction-array)]

@@ -463,122 +463,6 @@
          app-global-get app-global-put app-global-del app-global-get-ex
          asset-holding-get asset-params-get))
 
-(define (execute2 vm)
-  (match-let* ([(VM2 monad+
-                     [read-byte rb]
-                           [logic-sig-version lsv]
-                           in-mode
-                           get-bytecode
-                           get-pc set-pc
-                           [push vm:push] [pop vm:pop]
-                           is-zero
-                           panic
-                           addw
-                           transaction-array group-transaction-array
-                           return
-                           concat
-                           substring
-                           balance
-                           app-opted-in
-                           app-local-get app-local-put app-local-del app-local-get-ex
-                           app-global-get app-global-put app-global-del app-global-get-ex
-                           asset-holding-get asset-params-get)
-                vm]
-               [(Monad+ unit >>= mplus) monad+])
-    (define >> (derive->> monad+))
-    (define continue (unit))
-    (define (goto pc)
-      (if (< pc 0)
-        (panic "cannot go to negative counter ~a" pc)
-        (>>= get-bytecode
-             (λ (bc)
-               (if (> pc (bytes-length bc))
-                 (panic "cannot go to ~a past bytecode of length ~a" pc (bytes-length bc))
-                 (>>= (logic-sig-version lsv) 
-                      (λ (lsv)
-                        (if (and (= pc (bytes-length bc))
-                                 (< lsv 2))
-                          (panic "cannot go to end of bytecode (length ~a) in version ~a < 2" (bytes-length bc) lsv)
-                          (set-pc pc)))))))))
-    (define (jump offset)
-      (>>= (logic-sig-version lsv) 
-           (λ (lsv)
-             (if (and (< offset 0)
-                      (< lsv 4))
-               (panic "cannot jump backwards (offset ~a) in LogicSigVersion ~a < 4" offset lsv)
-               (>>= get-pc (λ (pc) (goto (+ pc offset))))))))
-    (define (pop [n 1])
-      (let loop ([n n]
-                 [xs (list)])
-        (if (zero? n)
-          (apply unit xs)
-          (>>= vm:pop (λ (x) (loop (sub1 n) (cons x xs)))))))
-    (define (push . xs) (foldr (λ (x m) (>> (vm:push x) m)) (unit) xs))
-    (define (primitive-apply f stack-arity . xs)
-      (>>= (>>= (pop stack-arity) (λ ys (apply f (append xs ys)))) push))
-    (sumtype-case-lambda i:Instruction2
-      [(i:Instruction1 instr)
-       ((execute1 vm) instr)]
-      [(i:addw)
-       (primitive-apply addw 2)]
-      [(i:txna [field f] [array-index ai])
-       (primitive-apply transaction-array 0 f ai)]
-      [(i:gtxna [group-index gi] [field f] [array-index ai])
-       (primitive-apply group-transaction-array 0 gi f ai)]
-      [(i:bz offset)
-       (>>= (>>= (pop) is-zero)
-            (λ (jump?)
-              (if jump?
-                (jump offset)
-                continue)))]
-      [(i:b offset)
-       (jump offset)]
-      [(i:return)
-       (>>= (pop) return)]
-      [(i:dup2)
-       (>>= (pop 2) (λ (a b) (push a b a b)))]
-      [(i:concat)
-       (primitive-apply concat 2)]
-      [(i:substring [start s] [end e])
-       (>>= (>>= (pop) (λ (a) (substring a s e))) push)]
-      [(i:substring3)
-       (primitive-apply substring 3)]
-      [(i:balance)
-       (>> (in-mode 'Application "balance")
-           (primitive-apply balance 1))]
-      [(i:app_opted_in)
-       (>> (in-mode 'Application "app_opted_in")
-           (primitive-apply app-opted-in 2))]
-      [(i:app_local_get)
-       (>> (in-mode 'Application "app_local_get")
-           (primitive-apply app-local-get 2))]
-      [(i:app_local_get_ex)
-       (>> (in-mode 'Application "app_local_get_ex")
-           (primitive-apply app-local-get-ex 3))]
-      [(i:app_global_get)
-       (>> (in-mode 'Application "app_global_get")
-           (primitive-apply app-global-get 1))]
-      [(i:app_global_get_ex)
-       (>> (in-mode 'Application "app_global_get_ex")
-           (primitive-apply app-global-get-ex 2))]
-      [(i:app_local_put)
-       (>> (in-mode 'Application "app_local_put")
-           (primitive-apply app-local-put 3))]
-      [(i:app_global_put)
-       (>> (in-mode 'Application "app_global_put")
-           (primitive-apply app-global-put 2))]
-      [(i:app_local_del)
-       (>> (in-mode 'Application "app_local_del")
-           (primitive-apply app-local-del 2))]
-      [(i:app_global_del)
-       (>> (in-mode 'Application "app_global_del")
-           (primitive-apply app-global-del 1))]
-      [(i:asset_holding_get [field f])
-       (>> (in-mode 'Application "asset_holding_get")
-           (>>= (pop 2) (λ (a b) (asset-holding-get a b f))))]
-      [(i:asset_params_get [field f])
-       (>> (in-mode 'Application "asset_params_get")
-           (>>= (>>= (pop) (λ (a) (asset-params-get a f))) push))])))
 
 
 (record VM3 VM2
@@ -1461,6 +1345,7 @@
 (define vm0
   (inc (execute
         read-instruction instruction-logic-signature-version instruction-name
+        get-intcblock get-bytecblock
         panic check-final
         logic-sig-version
         unit >>= >>)
@@ -1478,7 +1363,21 @@
                         (instruction-logic-signature-version instr)
                         (instruction-name instr))
                        (execute instr))))
-            check-final)]))
+            check-final)]
+       [lookup-intcblock
+        (λ (i)
+          (>>= get-intcblock
+           (λ (xs)
+             (if (< i (length xs))
+               (unit (list-ref xs i))
+               (panic "intcblock has ~a ints but index ~a requested" (length xs) i)))))]
+       [lookup-bytecblock
+        (λ (i)
+          (>>= get-bytecblock
+               (λ (bss)
+                 (if (< i (length bss))
+                   (unit (list-ref bss i))
+                   (panic "bytecblock has ~a bytes but index ~a requested" (length bss) i)))))]))
 
 (define vm1
   (inc (group-transaction
@@ -1486,17 +1385,19 @@
         in-mode
         is-zero
         pop push swap
-        store
+        store load
         arg
-        lookup-bytecblock put-bytecblock
-        lookup-intcblock put-intcblock
+        put-intcblock lookup-intcblock
+        put-bytecblock lookup-bytecblock
         mulw
         ed25519verify sha512-256 keccak256 sha256
-        u
+        u~ u^ u& u\| u% u== u< u* u/ u- u+
         btoi itob len
         ! \|\| &&
-        primitive-apply    
-        jump continue
+        primitive-apply
+        get-bytecode
+        get-pc set-pc
+        logic-sig-version
         panic
         unit >>= >>)
        [execute
@@ -1512,9 +1413,9 @@
           [(i:ed25519verify)
            (primitive-apply ed25519verify 3)]
           [(i:+)
-           (primitive-apply (u '+) 2)]
+           (primitive-apply u+ 2)]
           [(i:-)
-           (primitive-apply (u '-) 2)]
+           (primitive-apply u- 2)]
           [(i:/)
            (>>= (pop 2)
                 (λ (a b)
@@ -1522,30 +1423,30 @@
                        (λ (zero?)
                          (if zero?
                            (panic "/: ~a is 0" b)
-                           (>>= ((u '/) a b) push))))))]
+                           (>>= (u/ a b) push))))))]
           [(i:*)
-           (primitive-apply (u '*) 2)]
+           (primitive-apply u* 2)]
           [(i:<)
-           (primitive-apply (u '<) 2)]
+           (primitive-apply u< 2)]
           [(i:>)
            (>> swap
-               (primitive-apply (u '<) 2))]
+               (primitive-apply u< 2))]
           [(i:<=)
            (>> swap
-               (primitive-apply (u '<) 2)
+               (primitive-apply u< 2)
                (primitive-apply ! 1))]
           [(i:>=)
-           (>> (primitive-apply (u '<) 2)
+           (>> (primitive-apply u< 2)
                (primitive-apply ! 1))]
           [(i:&&)
            (primitive-apply && 2)]
           [(i:\|\|)
            (primitive-apply \|\| 2)]
           [(i:==)
-           (primitive-apply (u '==) 2)]
+           (primitive-apply u== 2)]
           [(i:!=)
-           (>> (primitive-apply (u '==) 2)
-               (primitive-apply (u '!) 1))]
+           (>> (primitive-apply u== 2)
+               (primitive-apply ! 1))]
           [(i:!)
            (primitive-apply ! 1)]
           [(i:len)
@@ -1561,15 +1462,15 @@
                        (λ (zero?)
                          (if zero?
                            (panic "%: ~a is 0" b)
-                           (>>= ((u '%) a b) push))))))]
+                           (>>= (u% a b) push))))))]
           [(i:\|)
-           (primitive-apply (u '\|) 2)]
+           (primitive-apply u\| 2)]
           [(i:&)
-           (primitive-apply (u '&) 2)]
+           (primitive-apply u& 2)]
           [(i:^)
-           (primitive-apply (u '^) 2)]
+           (primitive-apply u^ 2)]
           [(i:~)
-           (primitive-apply (u '~) 1)]
+           (primitive-apply u~ 1)]
           [(i:mulw)
            (primitive-apply mulw 2)]
           [(i:intcblock [uints ns])
@@ -1623,15 +1524,138 @@
            (primitive-apply store 1 i)]
           [(i:bnz offset)
            (>>= (>>= (pop) is-zero)
-                (λ (stay?)
-                  (if stay?
-                    continue
-                    (jump offset))))]
+                (λ (stay?) (if stay? continue (jump offset))))]
           [(i:pop)
            (>> (pop)
                continue)]
           [(i:dup)
-           (>>= (pop) (λ (x) (push x x)))])]))
+           (>>= (pop) (λ (x) (push x x)))])]
+       [continue
+        (unit)]
+       [jump
+        (λ (offset)
+          (if (< offset 0)
+            (>>= logic-sig-version
+                 (λ (lsv) (panic "cannot jump backwards (offset ~a) in LogicSigVersion ~a" offset lsv)))
+            (>>= get-pc (λ (pc) (goto (+ pc offset))))))]
+       [goto
+        (λ (pc)
+          (if (< pc 0)
+            (panic "cannot go to negative counter ~a" pc)
+            (>>= get-bytecode
+                 (λ (bc)
+                   (if (>= pc (bytes-length bc))
+                     (panic "cannot go to ~a at or past end of bytecode of length ~a" pc (bytes-length bc))
+                     (set-pc pc))))))]))
+
+
+
+(define vm2
+  (inc (asset-params-get
+        asset-holding-get
+        concat
+        balance
+        addw
+        app-opted-in
+        transaction-array group-transaction-array
+        app-local-get app-local-get-ex app-local-put app-local-del
+        app-global-get app-global-get-ex app-global-put app-global-del
+        get-bytecode
+        get-pc set-pc
+        push pop
+        primitive-apply
+        in-mode
+        panic
+        continue jump
+        is-zero
+        return
+        unit >>= >>)
+       [execute
+        (sumtype-case-lambda i:Instruction2
+          [(i:Instruction1 instr)
+           ((super execute) instr)]          
+          [(i:addw)
+           (primitive-apply addw 2)]
+          [(i:txna [field f] [array-index ai])
+           (primitive-apply transaction-array 0 f ai)]
+          [(i:gtxna [group-index gi] [field f] [array-index ai])
+           (primitive-apply group-transaction-array 0 gi f ai)]
+          [(i:bz offset)
+           (>>= (>>= (pop) is-zero)
+                (λ (jump?) (if jump? (jump offset) continue)))]
+          [(i:b offset)
+           (jump offset)]
+          [(i:return)
+           (>>= (pop) return)]
+          [(i:dup2)
+           (>>= (pop 2) (λ (a b) (push a b a b)))]
+          [(i:concat)
+           (primitive-apply concat 2)]
+          [(i:substring [start s] [end e])
+           (>>= (>>= (pop) (λ (a) (substring a s e))) push)]
+          [(i:substring3)
+           (primitive-apply substring 3)]
+          [(i:balance)
+           (>> (in-mode 'Application "balance")
+               (primitive-apply balance 1))]
+          [(i:app_opted_in)
+           (>> (in-mode 'Application "app_opted_in")
+               (primitive-apply app-opted-in 2))]
+          [(i:app_local_get)
+           (>> (in-mode 'Application "app_local_get")
+               (primitive-apply app-local-get 2))]
+          [(i:app_local_get_ex)
+           (>> (in-mode 'Application "app_local_get_ex")
+               (primitive-apply app-local-get-ex 3))]
+          [(i:app_global_get)
+           (>> (in-mode 'Application "app_global_get")
+               (primitive-apply app-global-get 1))]
+          [(i:app_global_get_ex)
+           (>> (in-mode 'Application "app_global_get_ex")
+               (primitive-apply app-global-get-ex 2))]
+          [(i:app_local_put)
+           (>> (in-mode 'Application "app_local_put")
+               (primitive-apply app-local-put 3))]
+          [(i:app_global_put)
+           (>> (in-mode 'Application "app_global_put")
+               (primitive-apply app-global-put 2))]
+          [(i:app_local_del)
+           (>> (in-mode 'Application "app_local_del")
+               (primitive-apply app-local-del 2))]
+          [(i:app_global_del)
+           (>> (in-mode 'Application "app_global_del")
+               (primitive-apply app-global-del 1))]
+          [(i:asset_holding_get [field f])
+           (>> (in-mode 'Application "asset_holding_get")
+               (>>= (pop 2) (λ (a b) (asset-holding-get a b f))))]
+          [(i:asset_params_get [field f])
+           (>> (in-mode 'Application "asset_params_get")
+               (>>= (>>= (pop) (λ (a) (asset-params-get a f))) push))])]
+       [goto
+        (λ (pc)
+          (if (< pc 0)
+            (panic "cannot go to negative counter ~a" pc)
+            (>>= get-bytecode
+                 (λ (bc)
+                   (if (> pc (bytes-length bc))
+                     (panic "cannot go to ~a past end of bytecode of length ~a" pc (bytes-length bc))
+                     (set-pc pc))))))]))
+
+(define vm3
+  (inc ()))
+
+(define vm4
+  (inc (get-pc
+        goto
+        >>=)
+       [jump
+        (λ (offset) (>>= get-pc (λ (pc) (goto (+ pc offset)))))]))
+
+(define vm5
+  (inc ()))
+
+(define vm6
+  (inc ()))
 
 (define vm-extras
   (inc (pop
@@ -1645,6 +1669,8 @@
               (>>= (super pop) (λ (x) (loop (sub1 n) (cons x xs)))))))]
        [push
         (λ xs (foldr (λ (x m) (>> ((super push) x) m)) (unit) xs))]
+       [swap
+        (>>= (pop 2) (λ (a b) (push b a)))]
        [primitive-apply
         (λ (f stack-arity . xs)
           (>>= (>>= (pop stack-arity) (λ ys (apply f (append xs ys)))) push))]
@@ -1687,7 +1713,7 @@
                           (panic "cannot go to end of bytecode (length ~a) in version ~a < 2" (bytes-length bc) lsv)
                           (set-pc pc)))))))))
 
-(define swap (>>= (pop 2) (λ (a b) (push b a))))
+(define swap )
     (define (primitive-apply f stack-arity . xs)
       (>>= (>>= (pop stack-arity) (λ ys (apply f (append xs ys)))) push))
     (define-syntax-rule (machine-fail instr)
@@ -1701,8 +1727,7 @@
            (<= 1 v 6))
     (apply mix
            vm-extras
-           (reverse (take (list vm0 vm1 ;vm2 vm3 vm4 vm5 #;vm6
-                                ) (add1 v))))
+           (reverse (take (list vm0 vm1 vm2 vm3 vm4 vm5 vm6) (add1 v))))
     (error 'vm/version "expected version 1, 2, 3, 4, 5, or 6; received ~v" v)))
 
 (provide vm/version)

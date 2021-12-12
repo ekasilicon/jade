@@ -58,7 +58,9 @@
                    (>>= read-bytes
                         (λ (bs)
                           (>>= (loop (sub1 n))
-                               (λ (bss) (unit (cons bs bss))))))))))]))
+                               (λ (bss) (unit (cons bs bss))))))))))]
+       [read-offset
+        read-int16]))
 
 (provide read-byte-extras)
 

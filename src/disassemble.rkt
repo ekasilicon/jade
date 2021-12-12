@@ -4,34 +4,40 @@
          racket/port
          "static/record.rkt"
          "static/sumtype.rkt"
-         (rename-in "monad.rkt" [>> make->>])
          "read-byte.rkt"
          (prefix-in i: "instruction.rkt"))
 
-(record failure (message))
-(record success (values state index))
+(define-sumtype Result
+  (failure message)
+  (success values state index))
 
-(define ((unit . xs) bs s i)
-  (success [values xs]
-           [state s]
-           [index i]))
-(define ((>>= m f) bs s i)
-  (match (m bs s i)
-    [(success [values xs] [state s] [index i])
-     ((apply f xs) bs s i)]
-    [(failure message)
-     (failure message)]
-    [#f
-     #f]))
+(define disassemble-monad
+  (mix monad-extras
+       (inc ()
+            [unit
+             (λ xs
+               (λ (bs s i)
+                 (success [values xs]
+                          [state s]
+                          [index i])))]
+            [>>=
+             (λ (m f)
+               (λ (bs s i)
+                 (match (m bs s i)
+                   [(success [values xs] [state s] [index i])
+                    ((apply f xs) bs s i)]
+                   [(failure message)
+                    (failure message)]
+                   [#f
+                    #f])))])))
 
-(define Disassemble-Monad (Monad unit >>=))
-
-(define >> (make->> Disassemble-Monad))
-
-(define ((mplus m₀ m₁) bs s i)
-  (cond
-    [(m₀ bs s i) => values]
-    [else (m₁ bs s i)]))
+(define disassemble-monad+
+  (mix monad+-extras
+       (inc ()
+            [mplus
+             (λ ms
+               (λ (bs s i)
+                 (ormap (λ (m) (m bs s i)) ms)))])))
 
 (define ((fail template . args) bs s i)
   (failure [message (apply format template args)]))
@@ -39,16 +45,16 @@
 (define ((fail/context make) bs s i)
   (make (λ (template . args) (failure [message (apply format template args)])) bs i))
 
-(define Disassemble-ReadByte
-  (ReadByte [monad Disassemble-Monad]
-            [read-byte (λ (bs s i)
-                         (if (= (bytes-length bs) i)
-                           #f
-                           (success [values (list (bytes-ref bs i))]
-                                    [state s]
-                                    [index (add1 i)])))]))
-
-(define rb Disassemble-ReadByte)
+(define disassemble-read-byte
+  (mix read-byte-extras
+       (inc ()
+            [read-byte
+             (λ (bs s i)
+               (if (= (bytes-length bs) i)
+                 #f
+                 (success [values (list (bytes-ref bs i))]
+                          [state s]
+                          [index (add1 i)])))])))
 
 (define (stream-end bs s i)
   (if (= (bytes-length bs) i)
@@ -64,6 +70,16 @@
 (define ((mupdate k f d) bs s i)
   (success [values (list)] [state (hash-update s k f d)] [index i]))
 
+#;
+(define disassemble
+  (inc (read-instruction
+        unit >>=)
+       [disassemble-instruction
+        (>>= read-instruction
+             (sumtype-case-lambda i:Instruction3))]))
+
+
+#;
 (define disassemble-instruction
   (>>= (i:read-instruction rb)
        (λ (instr)
@@ -82,9 +98,9 @@
            [(i:callsub offset)
             (>>= (offset→destination offset)
                  (λ (dst) (unit (i:callsub [offset dst]))))]
-           #:otherwise instr
-           (unit instr)))))
+           #:otherwise unit))))
 
+#;
 (define disassemble-instruction-stream
   (>>= position
        (λ (lft)
@@ -98,15 +114,18 @@
                            (fail/context (λ (fail bs i) (fail "unrecognized instruction at byte offset ~a: ~a" i (number->string (bytes-ref bs i) 16)))))
                     disassemble-instruction-stream)))))
 
+#;
 (define disassemble
   (>> (mplus (>>= (read-varuint rb) (mset 'logic-sig-version))
              (fail "unable to read initial logic signature version sequence"))
       (>>= position (mset 'initial))
       disassemble-instruction-stream))
 
+#;
 (define (run bs)
   (disassemble bs (hasheq) 0))
 
+#;
 (define (disassemble-bytes bs)
   (match (run bs)
     [(success [values (list)] state index)
@@ -116,21 +135,25 @@
     [#f
      (error 'disassemble "internal error")]))
 
+#;
 (define (disassemble-port ip)
   (disassemble-bytes (port->bytes ip)))
 
+#;
 (define-sumtype Directive
   i:Instruction
   (pragma content)
   (label ℓ))
 
+#;
 (provide (sumtype-out Directive))
 
+#;
 (define instruction-line
   (sumtype-case-lambda i:Instruction
-    #:otherwise _
-    "  instruction"))
+    #:otherwise (λ (_) "  instruction")))
 
+#;
 (define directive-line
   (sumtype-case-lambda Directive
     [(i:Instruction instr)
@@ -140,6 +163,7 @@
     [(label ℓ)
      (format "~a:" ℓ)]))
 
+#;
 (provide directive-line)
 
 #;
@@ -183,7 +207,7 @@
                        variants)])
          #'(∨ parser ...)))]))
 
-
+#;
 (define (state→assembly state)
   (cons (pragma [content (format "version ~a" (hash-ref state 'logic-sig-version))])
         (let ([instrs (hash-ref state 'instructions)]
@@ -214,7 +238,7 @@
                                      (add-destination dst)]
                                     [(i:callsub [offset dst])
                                      (add-destination dst)]
-                                    #:otherwise _ dsts))]))]
+                                    #:otherwise (λ (_) dsts)))]))]
                  [dsts (for/hash ([dst (in-list (sort (set->list dsts) <))]
                                   [i (in-naturals)])
                          (values dst (string->symbol (format "label~a" i))))])
@@ -232,14 +256,14 @@
                                         (i:bnz [offset (hash-ref dsts dst)])]
                                        [(i:callsub [offset dst])
                                         (i:callsub [offset (hash-ref dsts dst)])]
-                                       #:otherwise instr
-                                       instr)
+                                       #:otherwise values)
                                      (loop next-i))])])
                 (cond
                   [(hash-ref dsts i #f)
                    => (λ (ℓ) (cons (label ℓ) instrs))]
                   [else instrs])))))))
 
+#;
 (define (state→AST state)
   (let ([instructions (hash-ref state 'instructions)]
         [start-i (hash-ref state 'initial)])
@@ -299,16 +323,17 @@
               (terminal instr)]
              [(i:return)
               (terminal instr)]
-             #:otherwise _
-             (void))
+             #:otherwise void)
            (loop next-i)]
           [`(done)
            (void)]))
       (make-reader-graph (hash-ref phs start-i)))))
 
+#;
 (provide disassemble-bytes
          disassemble-port)
 
+#;
 (module+ main
   (require racket/pretty)
 

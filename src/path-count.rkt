@@ -21,9 +21,10 @@
   (sumtype-case Result (m st)
     [(success [values xs] [state st])
      ((apply f xs) st)]
-     #:otherwise x
-     (pretty-print x)
-     (raise 'stop)))
+    #:otherwise
+    (λ (x)
+      (pretty-print x)
+      (raise 'stop))))
 
 (define pc-Monad (Monad unit >>=))
 
@@ -58,8 +59,7 @@
          (let ([st (sumtype-case Result (((i:instruction-cost pc-LogicSigVersion) instr) st) 
                      [(success [values (list ic)] [state st])
                       (hash-update st 'execution-cost (λ (ec) (+ ec ic)))]
-                     #:otherwise _
-                     st)])
+                     #:otherwise (λ (_) st))])
            (sumtype-case i:Instruction instr
            [(i:b offset)
             (query-count (jump st offset))]
@@ -69,10 +69,8 @@
            [(i:bnz offset)
             (+ 1 (query-count st)
                1 (query-count (jump st offset)))]
-           #:otherwise _
-           (query-count st)))]
-        #:otherwise _
-        0))))
+           #:otherwise (λ (_) (query-count st))))]
+        #:otherwise (λ (_) 0)))))
 
 (define (inject bytecode)
   (match ((read-varuint prefix-ReadByte) bytecode)
@@ -116,8 +114,7 @@
                 (>> branch++
                     (each (jump offset) (unit)))]
                [(i:callsub) (raise 'callsub)]
-               #:otherwise instr
-               (unit)))
+               #:otherwise (λ (_) (unit))))
         check-final)))
 
 (module+ main

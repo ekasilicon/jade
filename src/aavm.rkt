@@ -1,11 +1,13 @@
 #lang racket/base
 (require (except-in racket/match ==)
          (only-in racket/list append-map)
+         racket/set
          "static/object.rkt"
          "static/sumtype.rkt"
          "monad.rkt"
-         "instruction.rkt"
-         "vm.rkt")
+         "prefix.rkt"
+         "vm.rkt"
+         (prefix-in i: "instruction.rkt"))
 
 (define-sumtype Result
   (underway values ς)
@@ -30,61 +32,62 @@
     [(_ key f iv)
      (λ (ς) (list (underway [values (list)] [ς (hash-update ς 'key f iv)])))]))
 
-(define vm
-  (fix (mix (vm/version 1)
-            (inc (panic
-                  unit >>= >>)
-                 [sha256 (λ (x) (raise x) (unit `(sha256 ,x)))]
-                 [panic
-                  (λ (template . args)
-                    (λ (ς)
-                      (list (failure! [message (apply format template args)]))))]
-                 [check-final
-                  (unit)]
-                 [push
-                  (λ (x) (update stack (λ (stk) (cons x stk))))]
-                 [pop
-                  (>>= (get stack)
-                       (match-lambda
-                         [(cons x stk)
-                          (>> (put stack stk)
-                              (unit x))]
-                         [(list)
-                          (panic "tried to pop an empty stack")]))])
-            (read/version 1)
-            (inc (unit)
-                 [read-byte (unit 1)])
-            (inc (unit)
-                 [logic-sig-version (unit 1)])
-            monad+-extras
-            (inc ()
-                 [mplus
-                  (λ ms (λ (ς) (apply append (map (λ (m) (m ς)) ms))))])
-            monad-extras
-            (inc ()
-                 [unit (λ values (λ (ς) (list (underway values ς))))]
-                 [>>= (λ (m f)
-                        (λ (ς)
-                          (append-map
-                           (sumtype-case-lambda Result
-                             [(underway [values xs] ς)
-                              ((apply f xs) ς)]
-                             #:otherwise r (list r))
-                           (m ς))))]))))
-
-
-(define-syntax p
-  (syntax-rules ()
-    [(_ who n)
-     (λ xs (apply unit (build-list n (λ (i) (list* 'who i xs)))))]
-    [(_ who)
-     (p who 1)]))
-
-(define standard-VM
-  (match-let ([(Monad+ [monad (Monad unit >>=)] [mplus each]) standard-Monad+]
-              [>> (>> standard-Monad)]
-              [fail (mzero standard-Monad+)])
-    (define interps
+(define (make-vm lsv)
+  (mix (vm/version lsv)
+       (inc (unit >>= >> mplus mzero)
+            [sha256 (λ (x) (raise x) (unit `(sha256 ,x)))]
+            [panic
+             (λ (template . args)
+               (λ (ς) (list (failure! [message (apply format template args)]))))]
+            [return
+             (λ (code)
+               (if0 code
+                 (λ (ς) (list (returned [code 0])))
+                 (λ (ς) (list (returned [code 1])))))]
+            [check-final
+             (unit)]
+            [push
+             (λ (x) (update stack (λ (stk) (cons x stk))))]
+            [pop
+             (>>= (get stack)
+                  (match-lambda
+                    [(cons x stk)
+                     (>> (put stack stk)
+                         (unit x))]
+                    [(list)
+                     (panic "tried to pop an empty stack")]))]
+            [get-pc
+             (get pc)]
+            [set-pc
+             (λ (pc) (put pc pc))]
+            [get-bytecode
+             (get bytecode)]
+            [get-intcblock
+             (get intcblock)]
+            [put-intcblock
+             (λ (xs) (put intcblock xs))]
+            [get-bytecblock
+             (get bytecblock)]
+            [put-bytecblock
+             (λ (bss) (put bytecblock bss))]
+            [transaction unit]
+            [global unit]
+            [group-transaction (p unit group-transaction 1)]
+            [transaction-array (p unit transaction-array 1)]
+            [btoi (p unit btoi 1)]
+            [itob (p unit itob 1)]
+            [u== (p unit == 1)]
+            [u<  (p unit < 1)]
+            [u+ (p unit + 1)]
+            [u* (p unit * 1)]
+            [u/ (p unit / 1)]
+            [u% (p unit % 1)]
+            [if0
+             (λ (x m₀ m₁)
+               (mplus (>> (refute x) m₀)
+                      (>> (assume x) m₁)))]
+            #;
+(define interps
       (list (letrec ([assume (match-lambda
                                [`(== ,t₀ ,t₁)
                                 (cond
@@ -147,6 +150,161 @@
                                        (unit)))])]
                                [_ #f])])
               (cons assume refute))))
+                
+            [assume
+             (match-lambda
+               [`(! 0 ,c) (refute c)]
+               [`(&& 0 ,c₀ ,c₁)
+                (>> (assume c₀)
+                    (assume c₁))]
+               [`(\|\| 0 ,c₀ ,c₁)
+                (mplus (assume c₀)
+                       (assume c₁))]
+               [`(== 0 ,c₀ ,c₁)
+                (cond
+                  [(and (exact-nonnegative-integer? c₀)
+                        (exact-nonnegative-integer? c₁))
+                   (if (= c₀ c₁) (unit) mzero)]
+                  [(and (bytes? c₀)
+                        (bytes? c₁))
+                   (if (bytes=? c₀ c₁) (unit) mzero)]
+                  [else
+                   (failure-cont)])]
+               [c
+                (cond
+                  [(exact-nonnegative-integer? c)
+                   (if (zero? c) mzero (unit))]
+                  #;
+                  [(ormap (λ (interp) (interp c)) (map car interps)) => values]
+                  [else
+                   (pretty-print c)
+                   (unit)])])]
+            [refute
+             (match-lambda
+               [`(! 0 ,c) (assume c)]
+               [`(&& 0 ,c₀ ,c₁)
+                (mplus (refute c₀)
+                       (refute c₁))]
+               [`(\|\| 0 ,c₀ ,c₁)
+                (>> (refute c₀)
+                    (refute c₁))]
+               [`(== 0 ,c₀ ,c₁)
+                (cond
+                  [(and (exact-nonnegative-integer? c₀)
+                        (exact-nonnegative-integer? c₁))
+                   (if (= c₀ c₁) mzero (unit))]
+                  [(and (bytes? c₀)
+                        (bytes? c₁))
+                   (if (bytes=? c₀ c₁) mzero (unit))]
+                  [else
+                   (failure-cont)])]
+               [c
+                (cond
+                  [(exact-nonnegative-integer? c)
+                   (if (zero? c) (unit) mzero)]
+                  #;
+                  [(ormap (λ (interp) (interp c)) (map cdr interps)) => values]
+                  [else
+                   (pretty-print c)
+                   (unit)])])]
+            [is-zero
+             (λ (x) (if0 x (unit #t) (unit #f)))]
+            [in-mode
+             (λ (target-mode info)
+               (>>= (get mode #f)
+                    (match-lambda
+                      [#f
+                       (put mode target-mode)]
+                      [mode
+                       (if (eq? mode target-mode)
+                         (unit)
+                         (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))]
+            [app-global-get
+             (λ (key)
+               (>>= (get app-global (list))
+                    (letrec ([lookup (match-lambda
+                                       [(list)
+                                        (unit `(app-global ,key))]
+                                       [(cons `(put ,put-key ,val)
+                                              ag)
+                                        (if0 `(== 0 ,key ,put-key)
+                                          (lookup ag)
+                                          (unit val))])])
+                      lookup)))]
+            [app-global-put
+             (λ (key val) (update app-global (λ (ag) (cons `(put ,key ,val) ag)) (list)))]
+
+            [app-global-get-ex
+             (λ (app key)
+               (>>= (get app-global (list))
+                    (letrec ([lookup (match-lambda
+                                       [(list)
+                                        (unit `(app-global ,app ,key)
+                                              `(app-global-exists ,app ,key))]
+                                       [(cons `(put ,put-key ,val)
+                                              al)
+                                        (if0 `(== 0 ,key ,put-key)
+                                          (lookup al)
+                                          (unit val 1))])])
+                      lookup)))]
+            [asset-holding-get (p unit asset-holding-get 1)]
+            [load
+             (λ (i)
+               (>>= (get scratch-space (hasheqv))
+                    (λ (ss)
+                      (cond
+                        [(hash-ref ss i #f) => unit]
+                        [else
+                         (>> #;(log "Scratch space slot ~a uninitialized. The Go VM implementation produces 0." i)
+                             (unit 0))]))))]
+            [store (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x)) (hasheqv)))]
+            [! (p unit ! 1)]
+            [&& (p unit && 1)]
+            [\|\| (p unit \|\| 1)])
+       (i:read/version lsv)
+       (inc (panic
+             unit >>= >>)
+            [read-byte
+             (>>= (get bytecode)
+                  (λ (bc)
+                    (>>= (get pc)
+                         (λ (pc)
+                           (if (>= pc (bytes-length bc))
+                             (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
+                             (>> (update pc add1)
+                                 (unit (bytes-ref bc pc))))))))])
+       (inc (unit)
+            [logic-sig-version
+             (get LogicSigVersion)])
+       monad+-extras
+       (inc ()
+            [mplus
+             (λ ms (λ (ς) (apply append (map (λ (m) (m ς)) ms))))])
+       monad-extras
+       (inc ()
+            [unit (λ values (λ (ς) (list (underway values ς))))]
+            [>>= (λ (m f)
+                   (λ (ς)
+                     (append-map
+                      (sumtype-case-lambda Result
+                        [(underway [values xs] ς)
+                         ((apply f xs) ς)]
+                        #:otherwise list)
+                      (m ς))))])))
+
+
+(define-syntax p
+  (syntax-rules ()
+    [(_ unit who n)
+     (λ xs (apply unit (build-list n (λ (i) (list* 'who i xs)))))]
+    [(_ unit who)
+     (p who 1)]))
+
+#;
+(define standard-VM
+  (match-let ([(Monad+ [monad (Monad unit >>=)] [mplus each]) standard-Monad+]
+              [>> (>> standard-Monad)]
+              [fail (mzero standard-Monad+)])
     (define <rw
       (match-lambda
         [`(<= ,t₀ ,t₁)
@@ -205,15 +363,7 @@
       (LogicSigVersion
        [monad standard-Monad]
        [logic-sig-version (get LogicSigVersion)])]
-     [in-mode (λ (target-mode info)
-                (>>= (get mode #f)
-                     (match-lambda
-                       [#f
-                        (put mode target-mode)]
-                       [mode
-                        (if (eq? mode target-mode)
-                          (unit)
-                          (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))]
+     [in-mode ]
      [arg (p arg 1)]
      [args (p args 1)]
      [push-call (p push-call 0)]
@@ -249,10 +399,6 @@
     [extract-uint (p extract-uint 1)]
      [&& (λ (s₀ s₁) (unit `(∧ ,s₀ ,s₁)))]
      [\|\| (λ (s₀ s₁) (unit `(∨ ,s₀ ,s₁)))]
-     [!
-      (match-lambda
-        [`(¬ ,s) (unit s)]
-        [s (unit `(¬ ,s))])]
      [uint-alu
       (unimplemented
        ArithmeticLogicUnit
@@ -286,13 +432,6 @@
                   (unit x))]
              [(list)
               (panic "tried to pop an empty stack")]))]
-     [get-pc (get pc)]
-     [set-pc (λ (pc) (put pc pc))]
-     [get-bytecode (get bytecode)]
-     [get-intcblock (get intcblock)]
-     [put-intcblock (λ (xs) (put intcblock xs))]
-     [get-bytecblock (get bytecblock)]
-     [put-bytecblock (λ (bss) (put bytecblock bss))]
      [is-zero (λ (x) (symbolic-if x (unit #f) (unit #t)))]
      [shl (p shl 1)]
      [shr (p shr 1)]
@@ -322,8 +461,8 @@
           [(i:ApplicationID i:NumAppArgs i:NumAccounts i:RekeyTo)
            (>> ((logic-sig-version>= standard-VM) 2 (i:transaction-field-name f))
                (unit f))]
-          #:otherwise f
-          (error 'transaction "handle case for ~a" f)))]
+          #:otherwise
+          (λ (f) (error 'transaction "handle case for ~a" f))))]
      [group-transaction
       (λ (gi f)
         (unit `(txn-property ,gi ,f)))]
@@ -347,8 +486,8 @@
           [(i:CurrentApplicationAddress i:GroupID)
            (>> ((logic-sig-version>= standard-VM) 5 (i:global-field-name f))
                (unit f))]
-          #:otherwise f
-          (error 'global "handle case for ~a" f)))]
+          #:otherwise
+          (λ (f) (error 'global "handle case for ~a" f))))]
      [balance
       (p balance 1)
       #;
@@ -363,18 +502,7 @@
      [app-opted-in
       (λ (acct app)
         (unit `(app-opted-in ,acct ,app)))]
-     [app-global-get
-      (λ (key)
-           (>>= (get app-global (list))
-                (letrec ([lookup (match-lambda
-                                   [(list)
-                                    (unit `(app-global ,key))]
-                                   [(cons `(put ,put-key ,val)
-                                          ag)
-                                    (symbolic-if `(== ,key ,put-key)
-                                                 (unit val)
-                                                 (lookup ag))])])
-                  lookup)))]
+     
      [app-global-get-ex
       (λ (app key)
         (>>= (get app-global (list))
@@ -388,8 +516,6 @@
                                               (unit val 1)
                                               (lookup al))])])
                lookup)))]
-     [app-global-put
-      (λ (key val) (update app-global (λ (ag) (cons `(put ,key ,val) ag)) (list)))]
      [app-global-del
       (p app-global-del 0)]
      [app-local-get
@@ -424,23 +550,12 @@
         (update app-local (λ (al) (cons `(put ,acct ,key ,val) al)) (list)))]
      [app-local-del
       (p app-local-del 0)]
-     [asset-holding-get
-      (λ (acct asst f)
-        (unit `(asset-holding ,acct ,asst ,f)))]
+     
      [asset-params-get
       (p asset-params-get 2)]
      [app-params-get
       (p app-params-get 2)]
-     [load
-      (λ (i)
-        (>>= (get scratch-space (hasheqv))
-             (λ (ss)
-               (cond
-                 [(hash-ref ss i #f) => unit]
-                 [else
-                  (>> (log "Scratch space slot ~a uninitialized. The Go VM implementation produces 0." i)
-                      (unit 0))]))))]
-     [store (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x)) (hasheqv)))]
+     
      [group-aid (p group-aid 1)]
      [group-load (p group-load 1)]
      [getbit (p getbit 1)]
@@ -458,14 +573,15 @@
                              [_ (panic "stack has more than one value at end of program")]))
                       (unit))))))])))
 
+
 (require racket/pretty)
 
-(define (analyze ς)
+(define (analyze vm ς)
   (foldl
    (λ (r fs)
      (match r
        [(underway [values (list)] ς)
-        (analyze ς)]
+        (analyze vm ς)]
        [(failure! message)
         (printf "failure: ~a\n" message)
         fs]
@@ -478,8 +594,9 @@
         (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
         fs]))
    (set)
-   ((step standard-VM) ς)))
+   ((vm 'step) ς)))
 
+#;
 (require (prefix-in d: "disassemble.rkt"))
 
 (define (run #:approval-program      approval-program
@@ -490,6 +607,7 @@
              #:local-num-uint        local-num-uint
              #:global-state          global-state
              #:mapped-constants      mapped-constants)
+  #;
   (for-each
    (λ (d) (displayln (d:directive-line d)))
    (d:disassemble-bytes approval-program))
@@ -501,9 +619,11 @@
                    'LocalNumUint       local-num-uint
                    'GlobalState        global-state
                    'MappedConstants    mapped-constants)])
-    (match ((read-varuint prefix-ReadByte) approval-program)
+    (match (((fix prefix-read-byte) 'read-varuint) approval-program) 
       [(cons lsv bytecode)
-       (analyze (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
+       (time
+       (analyze (fix (make-vm lsv))
+                (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
                        [ς (hash-set ς 'OnCompletion    (seteq 0 1 2 4 5))]
                        [ς (hash-set ς 'RekeyTo         #f)]
                        [ς (hash-set ς 'bytecode        bytecode)]
@@ -512,7 +632,7 @@
                        [ς (hash-set ς 'scratch-space   (hasheqv))]
                        [ς (hash-set ς 'intcblock       (list))]
                        [ς (hash-set ς 'bytecblock      (list))])
-                  ς))]))
+                  ς)))]))
   
   #;
              (run 
@@ -582,6 +702,7 @@ MESSAGE
            net/base64)
 
   (require racket/port
+           #;
            "disassemble.rkt")
   
   (match (current-command-line-arguments)
@@ -591,9 +712,5 @@ MESSAGE
         (displayln filename)
         (with-handlers (#;[exn:fail? (λ (e) (displayln (exn-message e)))]
                         )
-          (analyze/json-package (call-with-input-file filename port->bytes) (hasheq))))
+          (analyze/json-package (call-with-input-file filename port->bytes) (hash))))
       filenames)]))
-
-
-((vm 'step)
- (hasheq 'stack (list))) 
