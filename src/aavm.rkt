@@ -70,18 +70,6 @@
              (get bytecblock)]
             [put-bytecblock
              (λ (bss) (put bytecblock bss))]
-            [transaction unit]
-            [global unit]
-            [group-transaction (p unit group-transaction 1)]
-            [transaction-array (p unit transaction-array 1)]
-            [btoi (p unit btoi 1)]
-            [itob (p unit itob 1)]
-            [u== (p unit == 1)]
-            [u<  (p unit < 1)]
-            [u+ (p unit + 1)]
-            [u* (p unit * 1)]
-            [u/ (p unit / 1)]
-            [u% (p unit % 1)]
             [if0
              (λ (x m₀ m₁)
                (mplus (>> (refute x) m₀)
@@ -177,7 +165,7 @@
                   #;
                   [(ormap (λ (interp) (interp c)) (map car interps)) => values]
                   [else
-                   (pretty-print c)
+                   #;(pretty-print c)
                    (unit)])])]
             [refute
              (match-lambda
@@ -205,8 +193,29 @@
                   #;
                   [(ormap (λ (interp) (interp c)) (map cdr interps)) => values]
                   [else
-                   (pretty-print c)
+                   #;(pretty-print c)
                    (unit)])])]
+            [transaction unit]
+            [group-transaction (p unit group-transaction 1)]
+            [transaction-array (p unit transaction-array 1)]
+            [group-transaction-array (p unit group-transaction-array 1)]
+            [global unit]
+            [btoi (p unit btoi 1)]
+            [itob (p unit itob 1)]
+            [concat (p unit concat 1)]
+            [substring (p unit substring 1)]
+            [len (p unit len 1)]
+            [balance (p unit balance 1)]
+            [min-balance (p unit min-balance 1)]
+            [sha512-256 (p unit sha512-256 1)]
+            [u== (p unit == 1)]
+            [u<  (p unit < 1)]
+            [u+ (p unit + 1)]
+            [u- (p unit - 1)]
+            [u* (p unit * 1)]
+            [u/ (p unit / 1)]
+            [u& (p unit & 1)]
+            [u% (p unit % 1)]
             [is-zero
              (λ (x) (if0 x (unit #t) (unit #f)))]
             [in-mode
@@ -219,6 +228,39 @@
                        (if (eq? mode target-mode)
                          (unit)
                          (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))]
+            [app-opted-in (p unit app-opted-in 1)]
+            [app-local-get
+             (λ (acct key)
+               (>>= (get app-local (list))
+                    (letrec ([lookup (match-lambda
+                                       [(list)
+                                        (unit `(app-local-get 0 ,acct ,key))]
+                                       [(cons `(put ,put-acct ,put-key ,val)
+                                              al)
+                                        (if0 `(&& 0 (== 0 ,acct ,put-acct)
+                                                    (== 0 ,key  ,put-key))
+                                          (lookup al)
+                                          (unit val))])])
+                      lookup)))]
+            [app-local-get-ex
+             (λ (acct app key)
+               (>>= (get app-local (list))
+                    (letrec ([lookup (match-lambda
+                                       [(list)
+                                        (unit `(app-local-get-ex 0 ,acct ,app ,key)
+                                              `(app-local-get-ex 1 ,acct ,app ,key))]
+                                       [(cons `(put ,put-acct ,put-key ,val)
+                                              al)
+                                        (if0 `(&& 0 (== 0 ,acct ,put-acct)
+                                                    (== 0 ,key  ,put-key))
+                                          (lookup al)
+                                          (unit val 1))])])
+                      lookup)))]
+            [app-local-put
+             (λ (acct key val)
+               (update app-local (λ (al) (cons `(put ,acct ,key ,val) al)) (list)))]
+            [app-local-del
+             (p unit app-local-del 1)]
             [app-global-get
              (λ (key)
                (>>= (get app-global (list))
@@ -233,7 +275,8 @@
                       lookup)))]
             [app-global-put
              (λ (key val) (update app-global (λ (ag) (cons `(put ,key ,val) ag)) (list)))]
-
+            [app-global-del
+             (p unit app-global-del 1)]
             [app-global-get-ex
              (λ (app key)
                (>>= (get app-global (list))
@@ -499,9 +542,6 @@
             (symbolic-if (<rw `(<= ,acct ,(i:NumAccounts)))
                          )))]
      [min-balance (p min-balance 1)]
-     [app-opted-in
-      (λ (acct app)
-        (unit `(app-opted-in ,acct ,app)))]
      
      [app-global-get-ex
       (λ (app key)
@@ -518,36 +558,6 @@
                lookup)))]
      [app-global-del
       (p app-global-del 0)]
-     [app-local-get
-      (λ (acct key)
-        (>>= (get app-local (list))
-             (letrec ([lookup (match-lambda
-                                [(list)
-                                 (unit `(app-local ,acct ,key))]
-                                [(cons `(put ,put-acct ,put-key ,val)
-                                       al)
-                                 (symbolic-if `(∧ (== ,acct ,put-acct)
-                                                  (== ,key  ,put-key))
-                                              (unit val)
-                                              (lookup al))])])
-               lookup)))]
-     [app-local-get-ex
-      (λ (acct app key)
-        (>>= (get app-local (list))
-             (letrec ([lookup (match-lambda
-                                [(list)
-                                 (unit `(app-local ,acct ,app ,key)
-                                       `(app-local-exists ,acct ,app ,key))]
-                                [(cons `(put ,put-acct ,put-key ,val)
-                                       al)
-                                 (symbolic-if `(∧ (== ,acct ,put-acct)
-                                                  (== ,key  ,put-key))
-                                              (unit val 1)
-                                              (lookup al))])])
-               lookup)))]
-     [app-local-put
-      (λ (acct key val)
-        (update app-local (λ (al) (cons `(put ,acct ,key ,val) al)) (list)))]
      [app-local-del
       (p app-local-del 0)]
      
@@ -583,13 +593,13 @@
        [(underway [values (list)] ς)
         (analyze vm ς)]
        [(failure! message)
-        (printf "failure: ~a\n" message)
+        #;(printf "failure: ~a\n" message)
         fs]
        [(returned code)
-        (displayln "success")
-        (pretty-print code)
-        (pretty-print (hash-ref ς 'OnCompletion))
-        (pretty-print (hash-ref ς 'RekeyTo))
+        #;(displayln "success")
+        #;(pretty-print code)
+        #;(pretty-print (hash-ref ς 'OnCompletion))
+        #;(pretty-print (hash-ref ς 'RekeyTo))
         #;
         (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
         fs]))
@@ -621,6 +631,7 @@
                    'MappedConstants    mapped-constants)])
     (match (((fix prefix-read-byte) 'read-varuint) approval-program) 
       [(cons lsv bytecode)
+       (when (<= lsv 3)
        (time
        (analyze (fix (make-vm lsv))
                 (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
@@ -632,7 +643,8 @@
                        [ς (hash-set ς 'scratch-space   (hasheqv))]
                        [ς (hash-set ς 'intcblock       (list))]
                        [ς (hash-set ς 'bytecblock      (list))])
-                  ς)))]))
+                  ς)))  )
+       ]))
   
   #;
              (run 
@@ -692,6 +704,7 @@ Input JSON did not match expected format.
 (Was it produced by the Algorand API v2?)
 MESSAGE
                 )
+     #;
      (exit 255)]))
 
 (provide analyze/raw-binary

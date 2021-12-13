@@ -500,55 +500,7 @@
     (define swap (>>= (pop 2) (λ (a b) (push b a))))
     (define (primitive-apply f stack-arity . xs)
       (>>= (>>= (pop stack-arity) (λ ys (apply f (append xs ys)))) push))
-    (sumtype-case-lambda i:Instruction3
-      [(i:Instruction2 instr)
-       ((execute2 vm) instr)]
-      [(i:gtxns [field f])
-       (>>= (>>= (pop) (λ (gi) (group-transaction gi f))) push)]
-      [(i:gtxnsa [field f] [array-index ai])
-       (>>= (>>= (pop) (λ (gi) (group-transaction-array gi f ai))) push)]
-      [(i:assert)
-       (>>= (pop)
-            (λ (x)
-              (>>= (is-zero x)
-                   (λ (fail?)
-                     (if fail?
-                       (panic "assert: ~v" x)
-                       continue)))))]
-      [(i:dig n)
-       (>>= (let loop ([n n])
-              (>>= (pop)
-                   (λ (x)
-                     (if (zero? n)
-                       (>> (push x)
-                           (unit x))
-                       (>>= (loop (sub1 n))
-                            (λ (y)
-                              (push x)
-                              (unit y)))))))
-            push)]
-      [(i:swap)
-       swap]
-      [(i:select)
-       (>>= (pop 3)
-            (λ (a b c)
-              (>>= (is-zero c)
-                   (λ (zero?) (push (if zero? a b))))))]
-      [(i:getbit)
-       (primitive-apply getbit 2)]
-      [(i:setbit)
-       (primitive-apply setbit 3)]
-      [(i:getbyte)
-       (primitive-apply getbyte 2)]
-      [(i:setbyte)
-       (primitive-apply setbyte 3)]
-      [(i:min_balance)
-       (>> (in-mode 'Application "min_balance")
-           (primitive-apply min-balance 1))]
-      [(i:pushbytes [bytes bs])
-       (push bs)]
-      [(i:pushint [uint n])
-       (push n)])))
+    ))
 
 
 #|
@@ -1553,7 +1505,7 @@
 (define vm2
   (inc (asset-params-get
         asset-holding-get
-        concat
+        concat substring
         balance
         addw
         app-opted-in
@@ -1642,9 +1594,73 @@
                      (set-pc pc))))))]))
 
 (define vm3
-  (inc ()))
+  (inc (min-balance
+        getbit setbit
+        getbyte setbyte
+        group-transaction group-transaction-array
+        is-zero
+        pop push swap
+        jump continue
+        primitive-apply
+        in-mode
+        panic
+        unit >>= >>)
+       [execute
+        (sumtype-case-lambda i:Instruction3
+          [(i:Instruction2 instr)
+           ((super execute) instr)]          
+          [(i:gtxns [field f])
+           (>>= (>>= (pop) (λ (gi) (group-transaction gi f))) push)]
+          [(i:gtxnsa [field f] [array-index ai])
+           (>>= (>>= (pop) (λ (gi) (group-transaction-array gi f ai))) push)]
+          [(i:assert)
+           (>>= (pop)
+                (λ (x)
+                  (>>= (is-zero x)
+                       (λ (fail?)
+                         (if fail?
+                           (panic "assert: ~v" x)
+                           continue)))))]
+          [(i:dig n)
+           (>>= (let loop ([n n])
+                  (>>= (pop)
+                       (λ (x)
+                         (if (zero? n)
+                           (>> (push x)
+                               (unit x))
+                           (>>= (loop (sub1 n))
+                                (λ (y)
+                                  (push x)
+                                  (unit y)))))))
+                push)]
+          [(i:swap)
+           swap]
+          [(i:select)
+           (>>= (pop 3)
+                (λ (a b c)
+                  (>>= (is-zero c)
+                       (λ (zero?) (push (if zero? a b))))))]
+          [(i:getbit)
+           (primitive-apply getbit 2)]
+          [(i:setbit)
+           (primitive-apply setbit 3)]
+          [(i:getbyte)
+           (primitive-apply getbyte 2)]
+          [(i:setbyte)
+           (primitive-apply setbyte 3)]
+          [(i:min_balance)
+           (>> (in-mode 'Application "min_balance")
+           (primitive-apply min-balance 1))]
+          [(i:pushbytes [bytes bs])
+           (push bs)]
+          [(i:pushint [uint n])
+           (push n)])]))
 
 (define vm4
+  (λ (self super)
+    (λ (msg)
+      (error 'vm4 "implement vm4 for ~a" msg)))
+  #;
   (inc (get-pc
         goto
         >>=)
