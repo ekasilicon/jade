@@ -32,10 +32,17 @@
     [(_ key f iv)
      (λ (ς) (list (underway [values (list)] [ς (hash-update ς 'key f iv)])))]))
 
+(define-syntax p
+  (syntax-rules ()
+    [(_ unit who n)
+     (λ xs (apply unit (build-list n (λ (i) (list* 'who i xs)))))]
+    [(_ unit who)
+     (p who 1)]))
+
 (define (make-vm lsv)
   (mix (vm/version lsv)
        (inc (unit >>= >> mplus mzero)
-            [sha256 (λ (x) (raise x) (unit `(sha256 ,x)))]
+            [sha256 (p unit sha256 1)]
             [panic
              (λ (template . args)
                (λ (ς) (list (failure! [message (apply format template args)]))))]
@@ -45,7 +52,17 @@
                  (λ (ς) (list (returned [code 0])))
                  (λ (ς) (list (returned [code 1])))))]
             [check-final
-             (unit)]
+             (>>= (get bytecode)
+                  (λ (bc)
+                    (>>= (get pc)
+                         (λ (pc)
+                           (if (= pc (bytes-length bc))
+                             (>>= (get stack)
+                                  (match-lambda
+                                    [(list) (panic "stack is empty at end of program")]
+                                    [(list x) (return x)]
+                                    [_ (panic "stack has more than one value at end of program")]))
+                             (unit))))))]
             [push
              (λ (x) (update stack (λ (stk) (cons x stk))))]
             [pop
@@ -73,72 +90,7 @@
             [if0
              (λ (x m₀ m₁)
                (mplus (>> (refute x) m₀)
-                      (>> (assume x) m₁)))]
-            #;
-(define interps
-      (list (letrec ([assume (match-lambda
-                               [`(== ,t₀ ,t₁)
-                                (cond
-                                  [(and (bytes? t₀)
-                                        (bytes? t₁))
-                                   (if (bytes=? t₀ t₁)
-                                     (unit)
-                                     fail)]
-                                  [(and (exact-nonnegative-integer? t₀)
-                                        (exact-nonnegative-integer? t₁))
-                                   (if (= t₀ t₁)
-                                     (unit)
-                                     fail)]
-                                  [(equal? t₀ t₁)
-                                   (unit)]
-                                  [else
-                                   (letrec ([present? (match-lambda
-                                                        [(i:OnCompletion)
-                                                         #t]
-                                                        [(i:RekeyTo)
-                                                         #t]
-                                                        [`(,_ . ,ts)
-                                                         (ormap present? ts)]
-                                                        [_
-                                                         #f])])
-                                     (if (or (present? t₀)
-                                             (present? t₁))
-                                       (>>= (get OnCompletion)
-                                            (match-lambda))
-                                       (unit)))])]
-                               [_ #f])]
-                     [refute (match-lambda
-                               [`(== ,t₀ ,t₁)
-                                (cond
-                                  [(and (bytes? t₀)
-                                        (bytes? t₁))
-                                   (if (bytes=? t₀ t₁)
-                                     fail
-                                     (unit))]
-                                  [(and (exact-nonnegative-integer? t₀)
-                                        (exact-nonnegative-integer? t₁))
-                                   (if (= t₀ t₁)
-                                     fail
-                                     (unit))]
-                                  [(equal? t₀ t₁)
-                                   fail]
-                                  [else
-                                   (letrec ([present? (match-lambda
-                                                        [(i:OnCompletion)
-                                                         #t]
-                                                        [(i:RekeyTo)
-                                                         #t]
-                                                        [`(,_ . ,ts)
-                                                         (ormap present? ts)]
-                                                        [_
-                                                         #f])])
-                                     (if (or (present? t₀)
-                                             (present? t₁))
-                                       (match* (t₀ t₁))
-                                       (unit)))])]
-                               [_ #f])])
-              (cons assume refute))))
-                
+                      (>> (assume x) m₁)))]               
             [assume
              (match-lambda
                [`(! 0 ,c) (refute c)]
@@ -335,14 +287,214 @@
                         #:otherwise list)
                       (m ς))))])))
 
+(require racket/pretty)
 
-(define-syntax p
-  (syntax-rules ()
-    [(_ unit who n)
-     (λ xs (apply unit (build-list n (λ (i) (list* 'who i xs)))))]
-    [(_ unit who)
-     (p who 1)]))
+(define (analyze vm ς)
+  (foldl
+   (λ (r fs)
+     (match r
+       [(underway [values (list)] ς)
+        (analyze vm ς)]
+       [(failure! message)
+        #;(printf "failure: ~a\n" message)
+        fs]
+       [(returned code)
+        #;(displayln "success")
+        #;(pretty-print code)
+        #;(pretty-print (hash-ref ς 'OnCompletion))
+        #;(pretty-print (hash-ref ς 'RekeyTo))
+        #;
+        (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
+        fs]))
+   (set)
+   ((vm 'step) ς)))
 
+#;
+(require (prefix-in d: "disassemble.rkt"))
+
+(define (run #:approval-program      approval-program
+             #:clear-state-program   clear-state-program
+             #:global-num-byte-slice global-num-byte-slice
+             #:global-num-uint       global-num-uint
+             #:local-num-byte-slice  local-num-byte-slice
+             #:local-num-uint        local-num-uint
+             #:global-state          global-state
+             #:mapped-constants      mapped-constants)
+  #;
+  (for-each
+   (λ (d) (displayln (d:directive-line d)))
+   (d:disassemble-bytes approval-program))
+  (let ([ς (hasheq 'ApprovalProgram    approval-program
+                   'ClearStateProgram  clear-state-program
+                   'GlobalNumByteSlice global-num-byte-slice
+                   'GlobalNumUint      global-num-uint
+                   'LocalNumByteSlice  local-num-byte-slice
+                   'LocalNumUint       local-num-uint
+                   'GlobalState        global-state
+                   'MappedConstants    mapped-constants)])
+    (match (((fix prefix-read-byte) 'read-varuint) approval-program) 
+      [(cons lsv bytecode)
+       (when (<= lsv 3)
+       (time
+       (analyze (fix (make-vm lsv))
+                (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
+                       [ς (hash-set ς 'OnCompletion    (seteq 0 1 2 4 5))]
+                       [ς (hash-set ς 'RekeyTo         #f)]
+                       [ς (hash-set ς 'bytecode        bytecode)]
+                       [ς (hash-set ς 'pc              0)]
+                       [ς (hash-set ς 'stack           (list))]
+                       [ς (hash-set ς 'scratch-space   (hasheqv))]
+                       [ς (hash-set ς 'intcblock       (list))]
+                       [ς (hash-set ς 'bytecblock      (list))])
+                  ς)))  )
+       ]))
+  
+  #;
+             (run 
+              `(¬ 3))
+             #;
+             (run 
+              `3)
+             #;
+             42
+             #;
+  (match ((read-varuint prefix-ReadByte) bytecode)
+    [(cons lsv bytecode)
+     (if (<= lsv 3)
+       (analyze lsv bytecode on-completion)
+       (error 'standard "does not support LogicSigVersion = ~a > 3" lsv))
+     (raise lsv)]
+    [#f
+     (error 'standard "unable to read initial logic signature version")]))
+
+(define (analyze/raw-binary program-type bs constants)
+  42)
+
+(require json
+         net/base64)
+
+(define (analyze/json-package bs constants)
+  (match (with-handlers ([exn:fail:read? (λ (e)
+                                           (displayln (exn-message e))
+                                           (exit 255))])
+           (read-json (open-input-bytes bs)))
+    [(hash-table ('id id)
+                 ('params (hash-table ('approval-program    approval-program)
+                                      ('clear-state-program clear-state-program)
+                                      ('creator             creator)
+                                      ('global-state        global-entries)
+                                      ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
+                                                                        ('num-uint       global-num-uint)))
+                                      ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
+                                                                        ('num-uint       local-num-uint))))))
+     (run #:approval-program      (base64-decode (string->bytes/utf-8 approval-program))
+          #:clear-state-program   (base64-decode (string->bytes/utf-8 clear-state-program))
+          #:global-num-byte-slice global-num-byte-slice
+          #:global-num-uint       global-num-uint
+          #:local-num-byte-slice  local-num-byte-slice
+          #:local-num-uint        local-num-uint
+          #:global-state          (for/hash ([entry (in-list global-entries)])
+                                    (match entry
+                                      [(hash-table ('key key) ('value value))
+                                       (values (base64-decode (string->bytes/utf-8 key))
+                                               (match (hash-ref value 'type)
+                                                 [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
+                                                 [2 (hash-ref value 'uint)]))]))
+          #:mapped-constants constants)]
+    [json
+     (displayln #<<MESSAGE
+Input JSON did not match expected format.
+(Was it produced by the Algorand API v2?)
+MESSAGE
+                )
+     (exit 255)]))
+
+(provide analyze/raw-binary
+         analyze/json-package)
+
+(module+ main
+  (require json
+           net/base64)
+
+  (require racket/port
+           #;
+           "disassemble.rkt")
+  
+  (match (current-command-line-arguments)
+    [(vector filenames ...)
+     (for-each
+      (λ (filename)
+        (displayln filename)
+        (with-handlers (#;[exn:fail? (λ (e) (displayln (exn-message e)))]
+                        )
+          (analyze/json-package (call-with-input-file filename port->bytes) (hash))))
+      filenames)]))
+
+
+#;
+(define interps
+      (list (letrec ([assume (match-lambda
+                               [`(== ,t₀ ,t₁)
+                                (cond
+                                  [(and (bytes? t₀)
+                                        (bytes? t₁))
+                                   (if (bytes=? t₀ t₁)
+                                     (unit)
+                                     fail)]
+                                  [(and (exact-nonnegative-integer? t₀)
+                                        (exact-nonnegative-integer? t₁))
+                                   (if (= t₀ t₁)
+                                     (unit)
+                                     fail)]
+                                  [(equal? t₀ t₁)
+                                   (unit)]
+                                  [else
+                                   (letrec ([present? (match-lambda
+                                                        [(i:OnCompletion)
+                                                         #t]
+                                                        [(i:RekeyTo)
+                                                         #t]
+                                                        [`(,_ . ,ts)
+                                                         (ormap present? ts)]
+                                                        [_
+                                                         #f])])
+                                     (if (or (present? t₀)
+                                             (present? t₁))
+                                       (>>= (get OnCompletion)
+                                            (match-lambda))
+                                       (unit)))])]
+                               [_ #f])]
+                     [refute (match-lambda
+                               [`(== ,t₀ ,t₁)
+                                (cond
+                                  [(and (bytes? t₀)
+                                        (bytes? t₁))
+                                   (if (bytes=? t₀ t₁)
+                                     fail
+                                     (unit))]
+                                  [(and (exact-nonnegative-integer? t₀)
+                                        (exact-nonnegative-integer? t₁))
+                                   (if (= t₀ t₁)
+                                     fail
+                                     (unit))]
+                                  [(equal? t₀ t₁)
+                                   fail]
+                                  [else
+                                   (letrec ([present? (match-lambda
+                                                        [(i:OnCompletion)
+                                                         #t]
+                                                        [(i:RekeyTo)
+                                                         #t]
+                                                        [`(,_ . ,ts)
+                                                         (ormap present? ts)]
+                                                        [_
+                                                         #f])])
+                                     (if (or (present? t₀)
+                                             (present? t₁))
+                                       (match* (t₀ t₁))
+                                       (unit)))])]
+                               [_ #f])])
+              (cons assume refute))))
 #;
 (define standard-VM
   (match-let ([(Monad+ [monad (Monad unit >>=)] [mplus each]) standard-Monad+]
@@ -384,58 +536,14 @@
            [else
             (pretty-print c)
             (unit)])]))
-    (define (symbolic-if x c a)
-      (each (>> (assume x) c)
-            (>> (refute x) a)))
-    (define (group-transaction-array gi f ai)
-      (unit `(group-transaction-array ,gi ,f ,ai)))
     (VM
      [monad+ standard-Monad+]
-     [read-byte
-      (ReadByte [monad standard-Monad]
-                [read-byte
-                 (>>= (get bytecode)
-                      (λ (bc)
-                        (>>= (get pc)
-                             (λ (pc)
-                               (if (>= pc (bytes-length bc))
-                                 (panic "attempt to read at ~a but bytecode ends at ~a" pc (bytes-length bc))
-                                 (>> (update pc add1)
-                                     (unit (bytes-ref bc pc))))))))])]
+     [read-byte]
      [logic-sig-version
       (LogicSigVersion
        [monad standard-Monad]
        [logic-sig-version (get LogicSigVersion)])]
      [in-mode ]
-     [arg (p arg 1)]
-     [args (p args 1)]
-     [push-call (p push-call 0)]
-     [pop-call (p pop-call 0)]
-     [sha256 (p sha256 1)]
-     [keccak256 (p keccak256 1)]
-     [sha512-256 (p sha512-256 1)]
-     [ed25519verify (p ed25519verify 1)]
-     [ecdsa-verify (p ecdsa-verify 1)]
-     [ecdsa-pk-decompress (p ecdsa-pk-decompress 2)]
-     [ecdsa-pk-recover (p ecdsa-pk-recover 2)]
-     #|
-     [uint-alu
-      (ArithmeticLogicUnit)]
-     [! (p ! 1)]
-     [len (p len 1)]
-     [itob (p itob 1)]
-     [btoi (p btoi 1)]
-     |#
-     [mulw (p mulw 2)]
-     [addw (p addw 2)]
-     [expw (p expw 2)]
-     [divmodw (p divmodw 4)]
-     #|
-     [&& (p && 1)]
-     [\|\| (p \|\| 1)]
-    [concat (p concat 1)]
-    [substring (p substring 1)]
-    |#
     [getbyte (p getbyte 1)]
     [setbyte (p setbyte 1)]
     [extract (p extract 1)]
@@ -571,159 +679,4 @@
      [getbit (p getbit 1)]
      [setbit (p setbit 1)]
      [check-final
-      (>>= (get bytecode)
-           (λ (bc)
-             (>>= (get pc)
-                  (λ (pc)
-                    (if (= pc (bytes-length bc))
-                      (>>= (get stack)
-                           (match-lambda
-                             [(list) (panic "stack is empty at end of program")]
-                             [(list x) (return x)]
-                             [_ (panic "stack has more than one value at end of program")]))
-                      (unit))))))])))
-
-
-(require racket/pretty)
-
-(define (analyze vm ς)
-  (foldl
-   (λ (r fs)
-     (match r
-       [(underway [values (list)] ς)
-        (analyze vm ς)]
-       [(failure! message)
-        #;(printf "failure: ~a\n" message)
-        fs]
-       [(returned code)
-        #;(displayln "success")
-        #;(pretty-print code)
-        #;(pretty-print (hash-ref ς 'OnCompletion))
-        #;(pretty-print (hash-ref ς 'RekeyTo))
-        #;
-        (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
-        fs]))
-   (set)
-   ((vm 'step) ς)))
-
-#;
-(require (prefix-in d: "disassemble.rkt"))
-
-(define (run #:approval-program      approval-program
-             #:clear-state-program   clear-state-program
-             #:global-num-byte-slice global-num-byte-slice
-             #:global-num-uint       global-num-uint
-             #:local-num-byte-slice  local-num-byte-slice
-             #:local-num-uint        local-num-uint
-             #:global-state          global-state
-             #:mapped-constants      mapped-constants)
-  #;
-  (for-each
-   (λ (d) (displayln (d:directive-line d)))
-   (d:disassemble-bytes approval-program))
-  (let ([ς (hasheq 'ApprovalProgram    approval-program
-                   'ClearStateProgram  clear-state-program
-                   'GlobalNumByteSlice global-num-byte-slice
-                   'GlobalNumUint      global-num-uint
-                   'LocalNumByteSlice  local-num-byte-slice
-                   'LocalNumUint       local-num-uint
-                   'GlobalState        global-state
-                   'MappedConstants    mapped-constants)])
-    (match (((fix prefix-read-byte) 'read-varuint) approval-program) 
-      [(cons lsv bytecode)
-       (when (<= lsv 3)
-       (time
-       (analyze (fix (make-vm lsv))
-                (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
-                       [ς (hash-set ς 'OnCompletion    (seteq 0 1 2 4 5))]
-                       [ς (hash-set ς 'RekeyTo         #f)]
-                       [ς (hash-set ς 'bytecode        bytecode)]
-                       [ς (hash-set ς 'pc              0)]
-                       [ς (hash-set ς 'stack           (list))]
-                       [ς (hash-set ς 'scratch-space   (hasheqv))]
-                       [ς (hash-set ς 'intcblock       (list))]
-                       [ς (hash-set ς 'bytecblock      (list))])
-                  ς)))  )
-       ]))
-  
-  #;
-             (run 
-              `(¬ 3))
-             #;
-             (run 
-              `3)
-             #;
-             42
-             #;
-  (match ((read-varuint prefix-ReadByte) bytecode)
-    [(cons lsv bytecode)
-     (if (<= lsv 3)
-       (analyze lsv bytecode on-completion)
-       (error 'standard "does not support LogicSigVersion = ~a > 3" lsv))
-     (raise lsv)]
-    [#f
-     (error 'standard "unable to read initial logic signature version")]))
-
-(define (analyze/raw-binary program-type bs constants)
-  42)
-
-(require json
-         net/base64)
-
-(define (analyze/json-package bs constants)
-  (match (with-handlers ([exn:fail:read? (λ (e)
-                                           (displayln (exn-message e))
-                                           (exit 255))])
-           (read-json (open-input-bytes bs)))
-    [(hash-table ('id id)
-                 ('params (hash-table ('approval-program    approval-program)
-                                      ('clear-state-program clear-state-program)
-                                      ('creator             creator)
-                                      ('global-state        global-entries)
-                                      ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
-                                                                        ('num-uint       global-num-uint)))
-                                      ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
-                                                                        ('num-uint       local-num-uint))))))
-     (run #:approval-program      (base64-decode (string->bytes/utf-8 approval-program))
-          #:clear-state-program   (base64-decode (string->bytes/utf-8 clear-state-program))
-          #:global-num-byte-slice global-num-byte-slice
-          #:global-num-uint       global-num-uint
-          #:local-num-byte-slice  local-num-byte-slice
-          #:local-num-uint        local-num-uint
-          #:global-state          (for/hash ([entry (in-list global-entries)])
-                                    (match entry
-                                      [(hash-table ('key key) ('value value))
-                                       (values (base64-decode (string->bytes/utf-8 key))
-                                               (match (hash-ref value 'type)
-                                                 [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
-                                                 [2 (hash-ref value 'uint)]))]))
-          #:mapped-constants constants)]
-    [json
-     (displayln #<<MESSAGE
-Input JSON did not match expected format.
-(Was it produced by the Algorand API v2?)
-MESSAGE
-                )
-     #;
-     (exit 255)]))
-
-(provide analyze/raw-binary
-         analyze/json-package)
-
-(module+ main
-  (require json
-           net/base64)
-
-  (require racket/port
-           #;
-           "disassemble.rkt")
-  
-  (match (current-command-line-arguments)
-    [(vector filenames ...)
-     (for-each
-      (λ (filename)
-        (displayln filename)
-        (with-handlers (#;[exn:fail? (λ (e) (displayln (exn-message e)))]
-                        )
-          (analyze/json-package (call-with-input-file filename port->bytes) (hash))))
-      filenames)]))
+      ])))

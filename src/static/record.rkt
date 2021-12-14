@@ -164,6 +164,20 @@
 
 (provide record)
 
+#;
+(let ([w 45])
+  (record-copy Boo x
+               #:update y f
+               #:shadow z u
+               #:shadow w))
+
+#;
+(define-syntax record-copy
+  (syntax-parser
+    [(_ name:id 
+        )]))
+
+
 (module+ test
   (require rackunit))
 
