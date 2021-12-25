@@ -63,6 +63,8 @@
                                     [(list x) (return x)]
                                     [_ (panic "stack has more than one value at end of program")]))
                              (unit))))))]
+            [constant
+             unit]
             [push
              (λ (x) (update stack (λ (stk) (cons x stk))))]
             [pop

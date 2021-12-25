@@ -3,6 +3,11 @@
          racket/file
          racket/runtime-path)
 
+; 1. test against showcase programs
+;    a. include the use of constant mappings
+; 2. test against Reach programs
+; 3. test against AlgoExplorer programs
+
 (define-runtime-path here-path ".")
 
 (define (run f u)

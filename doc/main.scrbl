@@ -1,5 +1,32 @@
 #lang scribble/base
 
+Jade is a static analysis tool for TEAL bytecode.
+
+Currently, Jade supports a single analysis, @secref{unconstrained-parameter-analysis}.
+We are currently working to enhance Jade with multiple analyses.
+
+We intend for most of the analyses Jade features to be @deftech{fully-automatic}
+meaning that the analysis requires only a specification of its execution environment (e.g. via command-line arguments) to succeed.
+@secref{unconstrained-parameter-analysis} is @reftech{fully-automatic} in this sense.
+(We also intend for Jade to feature some @deftech{semi-automatic} analyses which can establish deeper properties about DApps but require expert guidance to succeed.)
+
+@section[#:tag "installation"]{Installation}
+
+Jade is written in @link{Racket} and uses the @link{Z3} SMT solver.
+
+In a clone of the @link{Jade repository}, you can invoke Jade using XXX.
+
+Alternatively, if you have Docker installed, you can run the Docker file present at the repository top level.
+
+@section[#:tag "unconstrained-parameter-analysis"]{Unconstrained Parameter Analysis}
+
+Each execution of a transaction takes place within an environment comprising the current state of the blockchain and a transaction group.
+Each transaction in the group has a number of parameters which can be set freely.
+
+The environment , comprised of global properties, and a transaction group The Algorand Virtual Machine allows transactions to specify effect
+
+The effects of execution of a transaction is Many transaction 
+
 Jade is a fully-automatic static analysis tool for TEAL bytecode.
 
 Currently, Jade supports TEALv3 bytecode and ensures that TEAL programs abide by the following constraints:

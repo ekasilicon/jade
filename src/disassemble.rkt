@@ -2,8 +2,10 @@
 (require racket/match
          racket/set
          racket/port
-         "static/record.rkt"
+         #;"static/record.rkt"
          "static/sumtype.rkt"
+         "static/object.rkt"
+         "monad.rkt"
          "read-byte.rkt"
          (prefix-in i: "instruction.rkt"))
 
@@ -11,15 +13,15 @@
   (failure message)
   (success values state index))
 
-(define disassemble-monad
+(define dis0
   (mix monad-extras
+       monad+-extras
+       read-byte-extras
        (inc ()
             [unit
              (λ xs
                (λ (bs s i)
-                 (success [values xs]
-                          [state s]
-                          [index i])))]
+                 (success [values xs] [state s] [index i])))]
             [>>=
              (λ (m f)
                (λ (bs s i)
@@ -29,62 +31,116 @@
                    [(failure message)
                     (failure message)]
                    [#f
-                    #f])))])))
-
-(define disassemble-monad+
-  (mix monad+-extras
-       (inc ()
+                    #f])))]
             [mplus
              (λ ms
                (λ (bs s i)
-                 (ormap (λ (m) (m bs s i)) ms)))])))
-
-(define ((fail template . args) bs s i)
-  (failure [message (apply format template args)]))
-
-(define ((fail/context make) bs s i)
-  (make (λ (template . args) (failure [message (apply format template args)])) bs i))
-
-(define disassemble-read-byte
-  (mix read-byte-extras
-       (inc ()
+                 (ormap (λ (m) (m bs s i)) ms)))]
             [read-byte
              (λ (bs s i)
                (if (= (bytes-length bs) i)
                  #f
                  (success [values (list (bytes-ref bs i))]
                           [state s]
-                          [index (add1 i)])))])))
+                          [index (add1 i)])))]
+            [fail
+             (λ (template . args)
+               (λ (bs s i)
+                 (failure [message (apply format template args)])))]
+            [fail/context
+             (λ (make)
+               (λ (bs s i)
+                 (make (λ (template . args) (failure [message (apply format template args)])) bs i)))]
+            [stream-end
+             (λ (bs s i)
+               (if (= (bytes-length bs) i)
+                 (success [values (list)] [state s] [index i])
+                 #f))]
+            [position
+             (λ (bs s i)
+               (success [values (list i)] [state s] [index i]))]
+            [mget
+             (λ (k d)
+               (λ (bs s i)
+                 (success [values (list (hash-ref s k d))] [state s] [index i])))]
+            [mset
+             (λ (k d)
+               (λ (bs s i)
+                 (success [values (list)] [state (hash-set s k v)] [index i])))]
+            [mupdate
+             (λ (k d)
+               (λ (bs s i)
+                 (success [values (list)] [state (hash-update s k f d)] [index i])))]
+            [disassemble-instruction
+             (>>= read-instruction process-instruction)]
+            [offset→destination
+                    (>>= position (λ (pc) (unit (+ pc offset))))])))
 
-(define (stream-end bs s i)
-  (if (= (bytes-length bs) i)
-    (success [values (list)] [state s] [index i])
-    #f))
-
-(define (position bs s i) (success [values (list i)] [state s] [index i]))
-
-(define ((mget k d) bs s i)
-  (success [values (list (hash-ref s k d))] [state s] [index i]))
-(define (((mset k) v) bs s i)
-  (success [values (list)] [state (hash-set s k v)] [index i]))
-(define ((mupdate k f d) bs s i)
-  (success [values (list)] [state (hash-update s k f d)] [index i]))
-
-#;
-(define disassemble
-  (inc (read-instruction
+(define dis1
+  (inc (offset→destination
         unit >>=)
-       [disassemble-instruction
-        (>>= read-instruction
-             (sumtype-case-lambda i:Instruction3))]))
+       [process-instruction
+        (sumtype-case-lambda i:Instruction1
+          [(i:bnz offset)
+           (>>= (offset→destination offset)
+                (λ (dst) (unit (i:bnz [offset dst]))))]
+               #:otherwise unit)]))
 
+(define dis2
+  (inc (unit >>=)
+       [process-instruction
+        (sumtype-case-lambda i:Instruction2
+          [(i:Instruction1 instr)
+           ((super process-instruction) instr)]
+          [(i:b offset)
+           (>>= (offset→destination offset)
+                (λ (dst) (unit (i:b [offset dst]))))]
+          [(i:bz offset)
+           (>>= (offset→destination offset)
+                (λ (dst) (unit (i:bz [offset dst]))))]
+          #:otherwise unit)]))
+
+(define dis3
+  (inc (unit)
+       [process-instruction
+        (sumtype-case-lambda i:Instruction3
+          [(i:Instruction2 instr)
+           ((super process-instruction) instr)]
+          #:otherwise unit)]))
+
+(define dis4
+  (inc (unit >>=)
+       [process-instruction
+        (sumtype-case-lambda i:Instruction4
+          [(i:Instruction3 instr)
+           ((super process-instruction) instr)]
+          [(i:callsub offset)
+           (>>= (offset→destination offset)
+                (λ (dst) (unit (i:callsub [offset dst]))))]
+          #:otherwise unit)]))
+
+(define dis5
+  (inc (unit)
+       [process-instruction
+        (sumtype-case-lambda i:Instruction5
+          [(i:Instruction4 instr)
+           ((super process-instruction) instr)]
+          #:otherwise unit)]))
+
+(define dis6
+  (inc (unit)
+       [process-instruction
+        (sumtype-case-lambda i:Instruction5
+          [(i:Instruction4 instr)
+           ((super process-instruction) instr)]
+          #:otherwise unit)]))
 
 #;
 (define disassemble-instruction
   (>>= (i:read-instruction rb)
        (λ (instr)
          (define (offset→destination offset)
-           (>>= position (λ (pc) (unit (+ pc offset)))))
+           )
          (sumtype-case i:Instruction instr
            [(i:b offset)
             (>>= (offset→destination offset)
@@ -99,6 +155,19 @@
             (>>= (offset→destination offset)
                  (λ (dst) (unit (i:callsub [offset dst]))))]
            #:otherwise unit))))
+
+(require "version.rkt")
+
+(define disassemble/version
+  (make-*/version 'disassemble/version dis0 dis1 dis2 dis3 dis4 dis5 dis6 disassemble-extras))
+
+(define (disassemble/version v)
+  (if (and (exact-nonnegative-integer? v)
+           (<= 1 v 6))
+    (apply mix
+           disassemble-extras
+           (reverse (take (list dis0 dis1 dis2 dis3 dis4 dis5 dis6) (add1 v))))
+    (error 'disassemble/version "expected version 1, 2, 3, 4, 5, or 6; received ~v" v)))
 
 #;
 (define disassemble-instruction-stream
@@ -207,11 +276,88 @@
                        variants)])
          #'(∨ parser ...)))]))
 
-#;
-(define (state→assembly state)
-  (cons (pragma [content (format "version ~a" (hash-ref state 'logic-sig-version))])
-        (let ([instrs (hash-ref state 'instructions)]
-              [start-i (hash-ref state 'initial)])
+(define instruction-offsets
+  (list (inc ()
+             ['offset
+              (sumtype-case-lambda i:Instruction1
+                [(i:bnz offset) offset]
+                #:otherwise (λ (_) #f))]
+             ['offset-map
+              (λ (f instr)
+                (sumtype-case i:Instruction1 instr
+                  [(i:bnz offset) (i:bnz [offset (f offset)])]
+                  #:otherwise values))])
+        (inc ()
+             ['offset
+              (sumtype-case-lambda i:Instruction2
+                [(i:Instruction1 instr)
+                 ((super offset) instr)]
+                [(i:b offset) offset]
+                [(i:bz offset) offset]
+                #:otherwise (λ (_) #f))]
+             ['offset-map
+              (λ (f instr)
+                (sumtype-case i:Instruction2 instr
+                  [(i:Instruction1 instr)
+                   ((super offset-map) f instr)]
+                  [(i:b offset) (i:b [offset (f offset)])]
+                  [(i:bz offset) (i:bz [offset (f offset)])]
+                  #:otherwise values))])
+        (inc ()
+             ['offset
+              (sumtype-case-lambda i:Instruction3
+                [(i:Instruction2 instr)
+                 ((super offset) instr)]
+                #:otherwise (λ (_) #f))]
+             ['offset-map
+              (λ (f instr)
+                (sumtype-case i:Instruction3 instr
+                  [(i:Instruction2 instr)
+                   ((super offset-map) f instr)]
+                  #:otherwise values))])
+        (inc ()
+             ['offset
+              (sumtype-case-lambda i:Instruction4
+                [(i:Instruction3 instr)
+                 ((super offset) instr)]
+                [(i:callsub offset) offset]
+                #:otherwise (λ (_) #f))]
+             ['offset-map
+              (λ (f instr)
+                (sumtype-case i:Instruction4 instr
+                  [(i:Instruction3 instr)
+                   ((super offset-map) f instr)]
+                  [(i:callsub offset) (i:callsub [offset (f offset)])]
+                  #:otherwise values))])
+        (inc ()
+             ['offset
+              (sumtype-case-lambda i:Instruction5
+                [(i:Instruction4 instr)
+                 ((super offset) instr)]
+                #:otherwise (λ (_) #f))]
+             ['offset-map
+              (λ (f instr)
+                (sumtype-case i:Instruction5 instr
+                  [(i:Instruction4 instr)
+                   ((super offset-map) f instr)]
+                  #:otherwise values))])
+        (inc ()
+             ['offset
+              (sumtype-case-lambda i:Instruction6
+                [(i:Instruction5 instr)
+                 ((super offset) instr)]
+                #:otherwise (λ (_) #f))]
+             ['offset-map
+              (λ (f instr)
+                (sumtype-case i:Instruction6 instr
+                  [(i:Instruction5 instr)
+                   ((super offset-map) f instr)]
+                  #:otherwise values))])))
+
+(define (state→assembly offset σ)
+  (cons (pragma [content (format "version ~a" (hash-ref σ 'logic-sig-version))])
+        (let ([instrs (hash-ref σ 'instructions)]
+              [start-i (hash-ref σ 'initial)])
           (define (instr-ref i)
             (cond
               [(hash-ref instrs i #f)
@@ -224,21 +370,15 @@
                            [`(done)
                             dsts]
                            [`(succ ,instr ,next-i)
-                            (define (add-destination dst)
-                              (if (hash-has-key? instrs dst)
-                                (set-add dsts dst)
-                                (error 'disassemble "branch to byte offset ~a not on instruction boundary" dst)))
                             (loop next-i
-                                  (sumtype-case i:Instruction instr
-                                    [(i:b [offset dst])
-                                     (add-destination dst)]
-                                    [(i:bz [offset dst])
-                                     (add-destination dst)]
-                                    [(i:bnz [offset dst])
-                                     (add-destination dst)]
-                                    [(i:callsub [offset dst])
-                                     (add-destination dst)]
-                                    #:otherwise (λ (_) dsts)))]))]
+                                  (cond
+                                    [((offset 'offset) instr)
+                                     => (λ (dst)
+                                          (if (hash-has-key? instrs dst)
+                                            (set-add dsts dst)
+                                            (error 'disassemble "branch to byte offset ~a not on instruction boundary" dst)))]
+                                    [else
+                                     dsts]))]))]
                  [dsts (for/hash ([dst (in-list (sort (set->list dsts) <))]
                                   [i (in-naturals)])
                          (values dst (string->symbol (format "label~a" i))))])
@@ -247,26 +387,20 @@
                               [`(done)
                                (list)]
                               [`(succ ,instr ,next-i)
-                               (cons (sumtype-case i:Instruction instr
-                                       [(i:b [offset dst])
-                                        (i:b [offset (hash-ref dsts dst)])]
-                                       [(i:bz [offset dst])
-                                        (i:bz [offset (hash-ref dsts dst)])]
-                                       [(i:bnz [offset dst])
-                                        (i:bnz [offset (hash-ref dsts dst)])]
-                                       [(i:callsub [offset dst])
-                                        (i:callsub [offset (hash-ref dsts dst)])]
-                                       #:otherwise values)
+                               (cons ((offset 'offset-map) (λ (dst) (hash-ref dsts dst)) instr)
                                      (loop next-i))])])
                 (cond
                   [(hash-ref dsts i #f)
                    => (λ (ℓ) (cons (label ℓ) instrs))]
                   [else instrs])))))))
 
-#;
-(define (state→AST state)
-  (let ([instructions (hash-ref state 'instructions)]
-        [start-i (hash-ref state 'initial)])
+
+
+(apply fix (take (reverse instruction-offsets) lsv))
+
+(define (σ→AST σ)
+  (let ([instructions (hash-ref σ 'instructions)]
+        [start-i (hash-ref σ 'initial)])
     ; instructions is a map from a left boundary to a `(succ ,instr ,next-i)
     ; where instr is the instruction at that boundary and next-i is the right boundary
     ; start-i is the left boundary of the first instruction
@@ -305,6 +439,9 @@
            (define (terminal instr)
              (placeholder-set! (hash-ref phs i)
                                (cons instr (list))))
+           (let* ([instr ((offset 'offset-map) )]))
+           (cond
+             [])
            (sumtype-case i:Instruction instr
              [(i:bz [offset dst])
               (resolve dst (λ (ph) (i:bz [offset ph])))]

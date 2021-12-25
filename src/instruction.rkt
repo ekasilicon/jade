@@ -10,7 +10,7 @@
          #;
          (rename-in "logic-sig-version.rkt" [LogicSigVersion LSV]))
 
-(define read0
+(define instr0
   (inc (logic-sig-version
         >>=)
        [decode-instruction
@@ -108,7 +108,7 @@
   (pop)
   (dup))
 
-(define read1
+(define instr1
   (inc (read-opcode read-uint8 read-offset read-intcblock read-bytecblock
         unit >>=)
        [instruction-logic-signature-version
@@ -253,6 +253,23 @@
   (LatestTimestamp)
   (CurrentApplicationID))
 
+(define-sumtype AssetParamsField2
+  (AssetTotal)
+  (AssetDecimals)
+  (AssetDefaultFrozen)
+  (AssetUnitName)
+  (AssetName)
+  (AssetURL)
+  (AssetMetadataHash)
+  (AssetManager)
+  (AssetReserve)
+  (AssetFreeze)
+  (AssetClawback))
+
+(define-sumtype AssetHoldingField2
+  (AssetBalance)
+  (AssetFrozen))
+
 (define-sumtype Instruction2
   Instruction1
   (addw)
@@ -278,11 +295,7 @@
   (asset_holding_get field)
   (asset_params_get field))
 
-(define-sumtype AssetHoldingField
-  (AssetBalance)
-  (AssetFrozen))
-
-(define read2
+(define instr2
   (inc (read-transaction-field read-global-field
         read-uint8 read-offset read-bytes read-varuint
         unit >>=)
@@ -371,7 +384,9 @@
 
 (provide (sumtype-out Instruction2)
          (sumtype-out TransactionField2)
-         (sumtype-out GlobalField2))
+         (sumtype-out GlobalField2)
+         (sumtype-out AssetParamsField2)
+         (sumtype-out AssetHoldingField2))
 
 (define-sumtype TransactionField3
   TransactionField2
@@ -385,6 +400,7 @@
   (LocalNumByteSlice))
 
 (define-sumtype GlobalField3
+  GlobalField2
   (CreatorAddress))
 
 (define-sumtype Instruction3
@@ -403,7 +419,7 @@
   (pushbytes bytes)
   (pushint uint))
 
-(define read3
+(define instr3
   (inc (read-transaction-field read-global-field
         read-uint8 read-offset read-bytes read-varuint
         unit >>=)
@@ -463,9 +479,6 @@
   TransactionField3
   (ExtraProgramPages))
 
-(define-sumtype GlobalField4
-  GlobalField3)
-
 (define-sumtype Instruction4
   Instruction3
   (divmodw)
@@ -498,7 +511,7 @@
   (b~)
   (bzero))
 
-(define read4
+(define instr4
   (inc (read-uint8 read-offset
         unit >>=)
        [instruction-logic-signature-version
@@ -549,8 +562,7 @@
           [bc ((super decode-transaction-field) bc)])]))
 
 (provide (sumtype-out Instruction4)
-         (sumtype-out TransactionField4)
-         (sumtype-out GlobalField4))
+         (sumtype-out TransactionField4))
 
 (define-sumtype TransactionField5
   TransactionField4
@@ -561,9 +573,24 @@
   (CreatedApplicationID))
 
 (define-sumtype GlobalField5
-  GlobalField4
+  GlobalField3
   (CurrentApplicationAddress)
   (GroupID))
+
+(define-sumtype AppParamsField5
+  (AppApprovalProgram)
+  (AppClearStateProgram)
+  (AppGlobalNumUint)
+  (AppGlobalNumByteSlice)
+  (AppLocalNumUint)
+  (AppLocalNumByteSlice)
+  (AppExtraProgramPages)
+  (AppCreator)
+  (AppAddress))
+
+(define-sumtype AssetParamsField5
+  AssetParamsField2
+  (AssetCreator))
 
 (define-sumtype Instruction5
   Instruction4
@@ -591,7 +618,7 @@
   (gtxnsas field)
   (args))
 
-(define read5
+(define instr5
   (inc (read-transaction-field
         read-uint8
         unit >>=)
@@ -651,19 +678,15 @@
 
 (provide (sumtype-out Instruction5)
          (sumtype-out TransactionField5)
-         (sumtype-out GlobalField5))
-
-(define-sumtype TransactionField6
-  TransactionField5)
-
-(define-sumtype GlobalField6
-  GlobalField5)
+         (sumtype-out GlobalField5)
+         (sumtype-out AppParamsField5)
+         (sumtype-out AssetParamsField5))
 
 (define-sumtype Instruction6
   Instruction5
   (itxn_next))
 
-(define read6
+(define instr6
   (inc (unit)
        [instruction-logic-signature-version
         (sumtype-case-lambda Instruction6
@@ -680,22 +703,17 @@
           [#xb6 (unit (itxn_next))]
           [oc   ((super decode-instruction) oc)])]))
 
-(provide (sumtype-out Instruction6)
-         (sumtype-out TransactionField6)
-         (sumtype-out GlobalField6))
+(provide (sumtype-out Instruction6))
 
-(define (read/version v)
-  (if (and (exact-nonnegative-integer? v)
-           (r:<= 1 v 6))
-    (apply mix
-           read-byte-extras
-           (reverse (take (list read0 read1 read2 read3 read4 read5 read6) (add1 v))))
-    (error 'read/version "expected version 1, 2, 3, 4, 5, or 6; received ~v" v)))
+(require "version.rkt")
 
-(provide read/version)
+(define instruction/version
+  (make-*/version 'instruction/version instr0 instr1 instr2 instr3 instr4 instr5 instr6 read-byte-extras))
+
+(provide instruction/version)
 
 (module+ main
-  (((fix (mix (read/version 1)
+  (((fix (mix (instruction/version 1)
               (inc ()
                    [unit (λ xs (λ (σ) (cons xs σ)))]
                    [>>= (λ (m f)
@@ -807,18 +825,8 @@
          asset-holding-field-name
          read-asset-holding-field)
 
-(define-sumtype AssetParamsField
-  (AssetTotal)
-  (AssetDecimals)
-  (AssetDefaultFrozen)
-  (AssetUnitName)
-  (AssetName)
-  (AssetURL)
-  (AssetMetadataHash)
-  (AssetManager)
-  (AssetReserve)
-  (AssetFreeze)
-  (AssetClawback)
+(define-sumtype AssetParamsfield5
+  AssetParamsField2
   (AssetCreator))
 
 (define asset-params-field
@@ -844,16 +852,6 @@
          read-asset-params-field
          asset-params-field-logic-signature-version)
 |#
-(define-sumtype AppParamsField
-  (AppApprovalProgram)
-  (AppClearStateProgram)
-  (AppGlobalNumUint)
-  (AppGlobalNumByteSlice)
-  (AppLocalNumUint)
-  (AppLocalNumByteSlice)
-  (AppExtraProgramPages)
-  (AppCreator)
-  (AppAddress))
 
 #;
 (define app-params-field

@@ -21,9 +21,14 @@
                                    (set! cached #'(force x))
                                    cached))]))]
                      ...)
-          (syntax-parameterize ([super (syntax-rules ()
-                                         [(_ x)
-                                          (mysuper 'x)])])
+          (syntax-parameterize ([super (let ([cached (hasheq)])
+                                         (syntax-parser
+                                           [(_ x:id)
+                                            (let ([x-symbol (syntax->datum #'x)])
+                                              (or (hash-ref cached x-symbol #f)
+                                                  (with-syntax ([y (syntax-local-lift-expression #'(delay (mysuper 'x)))])
+                                                    (set! cached (hash-set cached x-symbol #'(force y)))
+                                                    (hash-ref cached x-symbol))))]))])
             e))
       'expression
       (list))]))
