@@ -137,7 +137,7 @@ REPORT
                             (cons expected expecteds))
                        "")))
 
-(define ((guard p expected . expecteds) input i sk _)
+(define ((guard p expected . expecteds) input i sk fk)
   (p input i sk (λ () (error (apply report input i expected expecteds)))))
 
 ; testing

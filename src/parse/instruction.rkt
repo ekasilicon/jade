@@ -12,197 +12,20 @@
                      racket/match
                      syntax/parse))
 
-
-#|
-
-(require )
-|#
-#;
-(define-syntax instructionp
-  (syntax-parser
-    [(_ recname:id)
-     (match (syntax-local-value #'recname (λ () #f))
-       [(record-info _ fields _ constructor _ _)
-        (let ([recname (syntax->datum #'recname)])
-          (with-syntax ([name (symbol->string recname)]
-                        [cons constructor]
-                        [(fieldp ...) (map
-                                       (match-lambda
-                                         ['field
-                                          (match recname)])
-                                       fields)])
-          #'(make-instructionp name cons fieldp ...)))
-        ])]))
-
-#;
-(module+ test
-  (parse-success (enumtype-parser i:TransactionField5)
-                 "FreezeAsset"
-                 (i:FreezeAsset))
-
-  (parse-success (enumtype-parser i:GlobalField5)
-                 "Round"
-                 (i:Round))
-
-  (parse-success (enumtype-parser i:GlobalField2)
-                 "LatestTimestamp"
-                 (i:LatestTimestamp)))
-
-#;
-(define-syntax instruction-parser
-  (syntax-parser
-    [(_ instruction:id)
-     (match-let ([(sumtype-info variants _) (syntax-local-value #'instruction)])
-       (with-syntax ([(parser ...)
-                      (map
-                       (λ (variant)
-                         (match-let ([(record-info fields _ constructor _ _ _) (syntax-local-value variant)])
-                           ))
-                       variants)])
-         #'(∨ parser ...)))]))
-
-#;
-(define transaction-field
-  (enumtype-parser i:TransactionField))
-
-#;
-(define global-field
-  (enumtype-parser i:GlobalField))
-
-
-#;
-(define asset-holding-field
-  (enumtype-parser i:AssetHoldingField))
-
-#;
-(define asset-params-field
-  (enumtype-parser i:AssetParamsField))
-
-#;
-(define app-params-field
-  (enumtype-parser i:AppParamsField))
-
-
-#|
-(define-sumtype Pseudoinstruction
-  i:Instruction
-  (int uint)
-  (byte bytes))
-|#
-
-
-#|
-(define instruction
-  (>> whitespace*
-      (instruction-parser)))
-|#
-
-#;
-(define instruction-parse1
-  (instruction-parser i:Instruction1))
-
 (record label (ℓ))
+
+(provide label)
 
 (define label-identifier
   (lift (λ (c cs) (label [ℓ (string->symbol (apply string c cs))]))
         (∘ (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-"))
            (p* (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")))) ))
 
+(provide label-identifier)
+
 (define guarded-label
   (guard label-identifier
          "a label"))
-#|
-
-(require (for-syntax racket/base
-                     racket/match
-                     syntax/parse)
-         "../static/record.rkt"
-         "../static/sumtype.rkt")
-
-|#
-
-
-(define-for-syntax lift-parser
-  (let ([cache (list)])
-    (λ (sumtype-id variants)
-      (define (enumtype-parser* variant-ids)
-        (let-values ([(parsers names)
-                      (let loop ([variant-ids variant-ids])
-                        (match variant-ids
-                          [(list)
-                           (values (list) (list))]
-                          [(cons variant-id variant-ids)
-                           (let-values ([(parser names₀)
-                                         (cond
-                                           [(syntax-local-value variant-id (λ () #f))
-                                            => (match-lambda
-                                                 [(record-info _ _ _ _ _ _)
-                                                  (with-syntax ([variant variant-id]
-                                                                [name (symbol->string (syntax->datum variant-id))])
-                                                    (values #'(>> (literal name) (unit (variant)))
-                                                            (list #'name)))]
-                                                 [(sumtype-info variants _)
-                                                  (lift-parser variant-id variants)])]
-                                           [else
-                                            (raise-syntax-error #f "not reachable" variant-id)])]
-                                        [(parsers names₁)
-                                         (loop variant-ids)])
-                             (values (cons parser parsers)
-                                     (append names₀ names₁)))]))])
-          (with-syntax ([(p ...) parsers])
-            (values #'(∨ p ...) names))))
-      (cond
-        [(assoc sumtype-id cache free-identifier=?)
-         => (match-lambda
-              [(list* _ parser-id names)
-               (values parser-id names)])]
-        [else
-         (let-values ([(parser names) (enumtype-parser* variants)])
-           (let ([parser-id (syntax-local-lift-expression parser)])
-             (set! cache (cons (list* sumtype-id parser-id names) cache))
-             (values parser-id names)))]))))
-
-
-
-(define-syntax enumtype-parser
-  (syntax-parser
-    [(_ typename:id)
-     (match (syntax-local-value #'typename (λ () #f))
-       [(sumtype-info variants _)
-        (define (enumtype-parser* variant-ids)
-          (let-values ([(parsers names)
-                        (let loop ([variant-ids variant-ids])
-                          (match variant-ids
-                            [(list)
-                             (values (list) (list))]
-                            [(cons variant-id variant-ids)
-                             (let-values ([(parser names₀)
-                                           (cond
-                                             [(syntax-local-value variant-id (λ () #f))
-                                              => (match-lambda
-                                                   [(record-info _ _ _ _ _ _)
-                                                    (with-syntax ([variant variant-id]
-                                                                  [name (symbol->string (syntax->datum variant-id))])
-                                                      (values #'(>> (literal name) (unit (variant)))
-                                                              (list #'name)))]
-                                                   [(sumtype-info _ _)
-                                                    #'(super XXX)])]
-                                             [else
-                                              (raise-syntax-error #f "not reachable" variant-id)])]
-                                          [(parsers names₁)
-                                           (loop variant-ids)])
-                               (values (cons parser parsers)
-                                       (append names₀ names₁)))]))])
-            (with-syntax ([(p ...) parsers])
-              (values #'(∨ p ...) names))))
-        (raise 'here)
-        #;
-        (let-values ([(parser names) (lift-parser #'typename variants)])
-          (with-syntax ([p parser]
-                        [(name ...) names])
-            #'(guard p name ...)))]
-       [_
-        (raise-syntax-error #f "not a sumtype" #'typename)])]))
 
 (define-for-syntax (enumtype-methods guarded-method-name method-name typename)
   (match (syntax-local-value typename (λ () #f))
@@ -257,7 +80,7 @@
                                 (λ (xs) (unit (cons x xs)))))))]))
            (λ (xs) (unit (apply constructor xs))))))
 
-(require (for-syntax racket/pretty))
+(provide make-instruction-parser)
 
 (define-syntax instruction-parser
   (syntax-parser
@@ -307,25 +130,9 @@
      (match (syntax-local-value #'instruction-id (λ () #f))
        [(sumtype-info variants _)
         (with-syntax ([(p ...) (map parser variants)])
-          #;(pretty-print (syntax->datum #'(∨ p ...)))
-          #'(∨ p ...))
-             #;
-             (let ([parser-id (syntax-local-lift-expression
-                               (with-syntax ([(p ...) (map parser variants)])
-                                 #'(∨ p ...)))])
-               (set! cache (cons (cons #'instruction parser-id) cache))
-               parser-id)]
-            [_
-             (raise-syntax-error #f "not a sumtype" #'typename)])
-     #;
-     (cond
-         #;
-         [(assoc #'instruction cache free-identifier=?)
-          => (match-lambda
-               [(cons _ parser-id)
-                parser-id])]
-         [else
-          ])]))
+          #'(∨ p ...))]
+       [_
+        (raise-syntax-error #f "not a sumtype" #'typename)])]))
 
 (define-syntax instruction-mixin
   (syntax-parser
@@ -361,22 +168,6 @@
                                                 #'app-params-field-raw
                                                 #'app-params-field-type)
                               (list)))])
-       #;
-       (pretty-print
-        (syntax->datum
-         #'(inc (transaction-field
-               global-field
-               asset-params-field
-               asset-holding-field
-               app-params-field)
-              [instruction
-               (instruction-parser instruction-type
-                                   transaction-field
-                                   global-field
-                                   asset-params-field
-                                   asset-holding-field
-                                   app-params-field)]
-              method ...)))
        #'(inc (transaction-field
                global-field
                asset-params-field
@@ -426,6 +217,8 @@
            i:Instruction6)
           (inc ()))])
     (λ (lsv) ((fix (parser-object/version lsv)) 'instruction))))
+
+(provide instruction-parser/version)
 
 (module+ test
   (parse-success (instruction-parser/version 1)

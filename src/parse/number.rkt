@@ -101,7 +101,7 @@
 (provide (all-defined-out))
 
 (module+ test
-  (parse-failure (>>= guarded-uint8 (λ (x) (>> end-of-input (unit x))))
+  (parse-failure (>>0 guarded-uint8 end-of-input)
                  "256"
                  #rx"fit in a byte"))
 
@@ -112,29 +112,7 @@
             end-of-input))
    input 0
    (λ (xs _₀ _₁) (match-let ([(list x) xs]) x))
-   void)
-  #;
-  (define (fail)
-    (error (format #<<MESSAGE
-expected a nonnegative integer of the form
-
-  1234...
-  01234...
-  0x1234...
-
-but got
-
-  ~s
-
-MESSAGE
-                   input)))
-  #;
-  (varuint input 0
-           (λ (x i fk)
-             (end-of-input input i
-                           (λ (_ i fk) (match-let ([(list x) x]) x))
-                           fail))
-           fail))
+   (λ () (error (report input 0 "a nonnegative integer literal (possibly surrounded by whitespace)")))))
 
 (provide parse-varuint)
 

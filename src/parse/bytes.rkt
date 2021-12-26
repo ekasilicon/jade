@@ -25,6 +25,17 @@
                                       (sub1 (arithmetic-shift 1 (- num-bits 8))))
                          cs))))))
 
+(define (baseXX-sequence baseXX-digit? multiple)
+  (let loop ([i 0])
+    (>>= read-char
+         (λ (c)
+           (if (baseXX-digit? c)
+             (>>= (loop (add1 i))
+                  (λ (cs) (unit (cons c cs))))
+             (>>0 (unit (list))
+                  (∨ (literal (make-string (remainder (- multiple (remainder i multiple)) multiple) #\=))
+                     (unit))))))))
+
 (define base64-digit-values
   (for/hasheqv ([c (in-string "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")]
                 [i (in-naturals)])
@@ -33,9 +44,9 @@
 (define (base64-digit? c)
   (hash-has-key? base64-digit-values c))
 
-(define base64-cs->bytes (decode-baseXX base64-digit-values 6))
-
-(define base64-bytes (lift base64-cs->bytes (p* (cc base64-digit?))))
+(define base64-bytes
+  (lift (decode-baseXX base64-digit-values 6)
+        (baseXX-sequence base64-digit? 4)))
 
 (define base32-digit-values
   (for/hasheqv ([c (in-string "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")]
@@ -45,11 +56,9 @@
 (define (base32-digit? c)
   (hash-has-key? base32-digit-values c))
 
-(define base32-cs->bytes (decode-baseXX base32-digit-values 5))
-
-(define base32-bytes (lift base32-cs->bytes (p* (cc base32-digit?))))
-
-(define ((negate f) x) (not (f x)))
+(define base32-bytes
+  (lift (decode-baseXX base64-digit-values 5)
+        (baseXX-sequence base32-digit? 8)))
 
 (define bytes-hex-literal
   (>> (literal "0x")
@@ -124,7 +133,7 @@
          "0x0123456789abcdef..."
          "\"string literal\x01\x02\""))
 
-(provide (all-defined-out))
+(provide guarded-bytes)
 
 (define (parse-bytes input)
   ((>> whitespace*
@@ -133,44 +142,29 @@
             end-of-input))
    input 0
    (λ (xs _₀ _₁) (match-let ([(list x) xs]) x))
-   void))
+   (λ () (error (report input 0 "a bytes literal (possibly surrounded by whitespace)")))))
 
 (provide parse-bytes)
 
+
+
 (module+ test
-  (parse-bytes "0x3132333435")
-  (parse-bytes "b64 abcde")
-  #;(parse-bytes "b65 abcde")
-  (parse-bytes "\"hello\"")
-  #;(parse-bytes "0x313233343")
-  )
+  (parse-success guarded-bytes
+                 "0x3132333435"
+                 #"12345")
+  (parse-success guarded-bytes
+                 "b64 aGVsbG8"
+                 #"hello\0")
+  (parse-failure guarded-bytes
+                 "b65 aGVsbG8"
+                 #rx"")
+  (parse-success guarded-bytes
+                 "\"hello\""
+                 #"hello")
 
-#;
-(define (parse-bytes input)
-  (define (fail)
-    (error (format #<<MESSAGE
-expected bytes of the form
+  (parse-bytes "b64(aGVsbG8)")
+  #;
+  (parse-bytes "b64(aGVsbG8) 123"))
 
-  base64 AAAA...
-  b64 AAAA...
-  base64(AAAA...)
-  b64(AAAA...)
-  base32 AAAA...
-  b32 AAAA...
-  base32(AAAA...)
-  b32(AAAA...)
-  0x0123456789abcdef...
-  "string literal\x01\x02"
 
-but got
 
-  ~s
-
-MESSAGE
-                   input)))
-  (bytesp input 0
-          (λ (x i fk)
-            (end-of-input input i
-                          (λ (_ i fk) (match-let ([(list x) x]) x))
-                          fail))
-          fail))

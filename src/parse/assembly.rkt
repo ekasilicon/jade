@@ -1,50 +1,85 @@
 #lang racket/base
 (require racket/match
+         "../static/record.rkt"
          "base.rkt"
+         "number.rkt"
+         "bytes.rkt"
          "instruction.rkt")
 
 (record pragma (content))
-(record label (ℓ))
 
 (define pragma-directive
   (>> (literal "#pragma ")
       (lift (λ (cs) (pragma [content (apply string cs)])) (p* (p- (cc void) line-sentinel)))))
 
-(define pragma-directive-line
-  (>>0 pragma-directive line-sentinal))
+(module+ test
+  (parse-success pragma-directive
+                 "#pragma hello"
+                 (pragma [content "hello"]))
+
+  (parse-failure pragma-directive
+                 "#pragmahello"
+                 #rx""))
 
 (define comment
   (>> (literal "//")
       (lift (λ (cs) (apply string cs)) (p* (p- (cc void) line-sentinel)))))
 
-
-(define line
-  (>>0 (p? directive)
-       whitespace*
-       (p? comment)
-       (∨ newline end-of-input)))
-
 (define label-declaration
-  (>>0 (lift (λ (ℓ) (label ℓ)) label-identifier)
+  (>>0 label-identifier
        space*
        (literal ":")))
 
-(define directive
-  (∨ instruction
-     pragma-directive
-     label-declaration))
+(record varuint-immediate (value))
 
+(define int-parser
+  (make-instruction-parser "int" (λ (value) (varuint-immediate value)) guarded-varuint))
 
-(define-sumtype Directive
-  #;Pseudoinstruction
-  (pragma content)
-  #;(label ℓ)
-  )
+(module+ test
+  (parse-success int-parser
+                 "int 25"
+                 (varuint-immediate [value 25])))
 
+(record bytes-immediate (value))
+
+(define byte-parser
+  (make-instruction-parser "byte" (λ (value) (bytes-immediate value)) guarded-bytes))
+
+(module+ test
+  (parse-success byte-parser
+                 "byte base64 ZWE="
+                 (bytes-immediate [value #"ea\0"]))
+
+  (parse-success (>> whitespace*
+                     (>>0 (p? byte-parser)
+                          whitespace*
+                          (p? comment)
+                          line-sentinel))
+                 "\tbyte base64 ZWE=\n"
+                 (bytes-immediate [value #"ea\0"])))
 
 (define (parse input)
-  (let loop ([i 0])
-    (end-of-input input i (λ (_ i fk) (list))
+  ((>> whitespace* (>>0 pragma-directive line-sentinel))
+   input 0
+   (λ (xs i fk)
+     (match xs
+       [(list (pragma content))
+        (match (regexp-match #px"^version (\\d+)$" content)
+          [(list _ (app string->number lsv))
+           (let ([directive (∨ (∨ (instruction-parser/version lsv)
+                                  int-parser
+                                  byte-parser)
+                               pragma-directive
+                               label-declaration)])
+             (let ([line (>> whitespace*
+                             (>>0 (p? directive)
+                                  whitespace*
+                                  (p? comment)
+                                  line-sentinel))])
+               (let loop ([i i])
+                 ((>> whitespace* end-of-input)
+                  input i
+                  (λ (_ i fk) (list))
                   (λ ()
                     (line input i (λ (ds i fk)
                                     (match ds
@@ -57,9 +92,13 @@
                           (λ ()
                             (error (report input i
                                            "an instruction"
-                                           "a comment"
-                                           "a pragma directive"))))))))
+                                           "a comment signalled by //"
+                                           "a #pragma directive")))))))))]
+          [#f
+           (error (report input 0 "#pragma version <teal-version>"))])]))
+   (λ () (error (report input 0 "#pragma version <teal-version>")))))
 
+#;
 (define (resolve-control-flow directives)
   (let ([initial-ph (make-placeholder #f)])
     (let ([phs (let loop ([directives directives]
@@ -126,115 +165,16 @@
            (loop next-ph)]))
       (make-reader-graph initial-ph))))
 
-(module+ test
-  (parse-success pragma-directive
-                 "#pragma hello"
-                 (pragma [content "hello"]))
-
-  (parse-failure pragma-directive
-                 "#pragmahello"))
-
-
-
-(define input0
-  #<<INPUT
-#pragma version 3
-// restriction on all branches, calculate conditions up front, use conjunction
-  global ZeroAddress
-  txn RekeyTo
-  ==
-  intc 0
-  txn OnCompletion
-  ==
-  &&
-  txn Amount
-  intc 2
-  %
-  dup
-  intc 0
-  ==
-  bz next1
-  assert
-  b done
-next1:
-  dup
-  intc 1
-  ==
-  bz next2
-  assert
-  b done
-next2:
-  pop
-  err
-good:
-  pop
-  intc 1
-INPUT
-  )
-
-(define input1
-  #<<INPUT
-#pragma version 3
-// restriction on all branches, calculate conditions up front, use conjunction
-  global ZeroAddress
-  txn RekeyTo
-  ==
-  intc 0
-  txn OnCompletion
-  ==
-  &&
-  txn Amount
-  intc 2
-  %
-  dup
-  intc 0
-  ==
-  bz next1
-  assert
-  b done
-next1:
-  dup
-  intc 1
-  ==
-  bz next2
-  assert
-  b done
-next2:
-  pop
-  err
-good:
-  pop
-  intc 1
-
-INPUT
-  )
-
-
-
-(define (parse/version lsv s)
-  (match lsv
-    [3
-     (raise 3)]))
-
-(>>= pragma-directive
-     (match-lambda
-       [(pragma content)]))
-
-(define (parse s)
-  (pragma-directive
-   s 0
-   (λ (xs i fk)
-     (match xs
-       [(list (pragma content))
-        (match (regexp-match #px"^version (\\d+)$" content)
-          [(list _ (app string->number lsv))
-           (values lsv (λ (p) (p s i)))]
-          [#f
-           (error "expected version <teal-version>; got ~s" content)])]))
-   (λ () (error 'expected-a-pragma-line))))
-
 (module+ main
-  (parse input0))
+  (require racket/port
+           racket/pretty)
+
+  (let ([input (port->string (current-input-port))])
+    (let ([directives (time (parse input))])
+      (pretty-print directives)
+      #;
+      (pretty-print (resolve-control-flow directives)))))
+
 #;
 (module+ main
   (require racket/port
@@ -281,8 +221,5 @@ INPUT
   (parse-bytes "\"abc\\n\\r\\t\\x10\"")
   (parse-bytes "\"string literal\\xAB\\xCD\\xFF\"")
   
-  #;
-  (let ([input (port->string (current-input-port))])
-    (let ([directives (time (parse input))])
-      (pretty-print directives)
-      (pretty-print (resolve-control-flow directives)))))
+  
+  )
