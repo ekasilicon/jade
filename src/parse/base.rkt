@@ -115,6 +115,12 @@
        (displayln "FAILED")
        (fk))))
 
+(define ((checkpoint template . args) input i sk fk)
+  (display "checkpoint ")
+  (displayln (apply format template args))
+  (println (snippet input i))
+  (sk (list) i fk))
+
 (define (snippet input i)
   (substring input i (min (string-length input) (+ i 24))))
 

@@ -12,7 +12,10 @@
            (if (< num-bits 8)
              (match cs
                [(list)
-                (list (arithmetic-shift accumulator (- 8 num-bits)))]
+                #;
+                (list (arithmetic-shift accumulator (- 8 num-bits)))
+                ; if there are no more characters, the remaining bits are discarded
+                (list)]
                [(cons c cs)
                 (loop (+ num-bits value-width)
                       (bitwise-ior (arithmetic-shift accumulator value-width)
@@ -27,14 +30,15 @@
 
 (define (baseXX-sequence baseXX-digit? multiple)
   (let loop ([i 0])
-    (>>= read-char
-         (λ (c)
-           (if (baseXX-digit? c)
-             (>>= (loop (add1 i))
-                  (λ (cs) (unit (cons c cs))))
-             (>>0 (unit (list))
-                  (∨ (literal (make-string (remainder (- multiple (remainder i multiple)) multiple) #\=))
-                     (unit))))))))
+    (∨ (>>= (>>= read-char
+                 (λ (c)
+                   (if (baseXX-digit? c)
+                     (unit c)
+                     fail)))
+            (λ (c) (>>= (loop (add1 i)) (λ (cs) (unit (cons c cs))))))
+       (>>0 (unit (list))
+            (∨ (literal (make-string (remainder (- multiple (remainder i multiple)) multiple) #\=))
+               (unit))))))
 
 (define base64-digit-values
   (for/hasheqv ([c (in-string "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")]
@@ -47,6 +51,11 @@
 (define base64-bytes
   (lift (decode-baseXX base64-digit-values 6)
         (baseXX-sequence base64-digit? 4)))
+
+(module+ test
+  (parse-success base64-bytes
+                 "aGVsbG8="
+                 #"hello"))
 
 (define base32-digit-values
   (for/hasheqv ([c (in-string "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")]
@@ -139,7 +148,8 @@
   ((>> whitespace*
        (>>0 guarded-bytes
             whitespace*
-            end-of-input))
+            (guard end-of-input
+                   "end of input")))
    input 0
    (λ (xs _₀ _₁) (match-let ([(list x) xs]) x))
    (λ () (error (report input 0 "a bytes literal (possibly surrounded by whitespace)")))))
@@ -154,7 +164,7 @@
                  #"12345")
   (parse-success guarded-bytes
                  "b64 aGVsbG8"
-                 #"hello\0")
+                 #"hello")
   (parse-failure guarded-bytes
                  "b65 aGVsbG8"
                  #rx"")
@@ -162,8 +172,11 @@
                  "\"hello\""
                  #"hello")
 
-  (parse-bytes "b64(aGVsbG8)")
-  #;
+  (require rackunit)
+
+  (check-equal? (parse-bytes "b64(aGVsbG8)")
+                #"hello")
+  
   (parse-bytes "b64(aGVsbG8) 123"))
 
 
