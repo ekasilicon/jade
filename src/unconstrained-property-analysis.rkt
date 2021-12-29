@@ -1,4 +1,14 @@
 #lang racket/base
+(require racket/match
+         racket/set
+         (only-in racket/list append-map)
+         (only-in racket/string string-join)
+         "static/sumtype.rkt"
+         "monad.rkt"
+         "read-byte.rkt"
+         "prefix.rkt"
+         "vm.rkt"
+         (prefix-in i: "instruction.rkt"))
 
 #|
 
@@ -113,19 +123,6 @@ the state space, so this should be a very brisk analysis.
 
 |#
 
-(require racket/match
-         racket/set
-         (only-in racket/list append-map)
-         (only-in racket/string string-join)
-         "static/sumtype.rkt"
-         "monad.rkt"
-         "read-byte.rkt"
-         "logic-sig-version.rkt"
-         "arithmetic-logic-unit.rkt"
-         "internal-transaction.rkt"
-         "prefix.rkt"
-         "vm.rkt"
-         (prefix-in i: "instruction.rkt"))
 
 (define (inject bytecode OnCompletion RekeyTo sk fk)
   (match ((read-varuint prefix-ReadByte) bytecode)
@@ -586,7 +583,7 @@ the state space, so this should be a very brisk analysis.
                                 [(list) (panic "stack is empty at end of program")]
                                 [(list x) (return x)]
                                 [_ (panic "stack has more than one value at end of program")]))
-                         (unit))))))])))
+                         (unit))))))])
 
 
 (define ⇒
@@ -608,7 +605,7 @@ the state space, so this should be a very brisk analysis.
                     [(list)
                      (sk final)]
                     [(cons ς todo)
-                     (if (set-member? seen ς) 
+                     (if (set-member? seen ς)
                        (loop todo seen final)
                        (let-values ([(todo final) (for/fold ([todo todo]
                                                              [final final])

@@ -5,7 +5,7 @@
          "../static/sumtype.rkt"
          "../static/object.rkt"
          "base.rkt"
-         "number.rkt"
+         "uint.rkt"
          "bytes.rkt"
          (prefix-in i: "../instruction.rkt")
          (for-syntax racket/base

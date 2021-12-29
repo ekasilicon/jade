@@ -74,7 +74,7 @@
             [disassemble-instruction
              (>>= read-instruction process-instruction)]
             [offset→destination
-                    (>>= position (λ (pc) (unit (+ pc offset))))])))
+             (>>= position (λ (pc) (unit (+ pc offset))))])))
 
 (define dis1
   (inc (offset→destination
@@ -135,6 +135,11 @@
            ((super process-instruction) instr)]
           #:otherwise unit)]))
 
+(require "version.rkt")
+
+(define disassemble/version
+  (make-*/version 'disassemble/version dis0 dis1 dis2 dis3 dis4 dis5 dis6 disassemble-extras))
+
 #;
 (define disassemble-instruction
   (>>= (i:read-instruction rb)
@@ -156,18 +161,6 @@
                  (λ (dst) (unit (i:callsub [offset dst]))))]
            #:otherwise unit))))
 
-(require "version.rkt")
-
-(define disassemble/version
-  (make-*/version 'disassemble/version dis0 dis1 dis2 dis3 dis4 dis5 dis6 disassemble-extras))
-
-(define (disassemble/version v)
-  (if (and (exact-nonnegative-integer? v)
-           (<= 1 v 6))
-    (apply mix
-           disassemble-extras
-           (reverse (take (list dis0 dis1 dis2 dis3 dis4 dis5 dis6) (add1 v))))
-    (error 'disassemble/version "expected version 1, 2, 3, 4, 5, or 6; received ~v" v)))
 
 #;
 (define disassemble-instruction-stream
@@ -275,84 +268,6 @@
                              #'(make-instruction name constructor field ...))))
                        variants)])
          #'(∨ parser ...)))]))
-
-(define instruction-offsets
-  (list (inc ()
-             ['offset
-              (sumtype-case-lambda i:Instruction1
-                [(i:bnz offset) offset]
-                #:otherwise (λ (_) #f))]
-             ['offset-map
-              (λ (f instr)
-                (sumtype-case i:Instruction1 instr
-                  [(i:bnz offset) (i:bnz [offset (f offset)])]
-                  #:otherwise values))])
-        (inc ()
-             ['offset
-              (sumtype-case-lambda i:Instruction2
-                [(i:Instruction1 instr)
-                 ((super offset) instr)]
-                [(i:b offset) offset]
-                [(i:bz offset) offset]
-                #:otherwise (λ (_) #f))]
-             ['offset-map
-              (λ (f instr)
-                (sumtype-case i:Instruction2 instr
-                  [(i:Instruction1 instr)
-                   ((super offset-map) f instr)]
-                  [(i:b offset) (i:b [offset (f offset)])]
-                  [(i:bz offset) (i:bz [offset (f offset)])]
-                  #:otherwise values))])
-        (inc ()
-             ['offset
-              (sumtype-case-lambda i:Instruction3
-                [(i:Instruction2 instr)
-                 ((super offset) instr)]
-                #:otherwise (λ (_) #f))]
-             ['offset-map
-              (λ (f instr)
-                (sumtype-case i:Instruction3 instr
-                  [(i:Instruction2 instr)
-                   ((super offset-map) f instr)]
-                  #:otherwise values))])
-        (inc ()
-             ['offset
-              (sumtype-case-lambda i:Instruction4
-                [(i:Instruction3 instr)
-                 ((super offset) instr)]
-                [(i:callsub offset) offset]
-                #:otherwise (λ (_) #f))]
-             ['offset-map
-              (λ (f instr)
-                (sumtype-case i:Instruction4 instr
-                  [(i:Instruction3 instr)
-                   ((super offset-map) f instr)]
-                  [(i:callsub offset) (i:callsub [offset (f offset)])]
-                  #:otherwise values))])
-        (inc ()
-             ['offset
-              (sumtype-case-lambda i:Instruction5
-                [(i:Instruction4 instr)
-                 ((super offset) instr)]
-                #:otherwise (λ (_) #f))]
-             ['offset-map
-              (λ (f instr)
-                (sumtype-case i:Instruction5 instr
-                  [(i:Instruction4 instr)
-                   ((super offset-map) f instr)]
-                  #:otherwise values))])
-        (inc ()
-             ['offset
-              (sumtype-case-lambda i:Instruction6
-                [(i:Instruction5 instr)
-                 ((super offset) instr)]
-                #:otherwise (λ (_) #f))]
-             ['offset-map
-              (λ (f instr)
-                (sumtype-case i:Instruction6 instr
-                  [(i:Instruction5 instr)
-                   ((super offset-map) f instr)]
-                  #:otherwise values))])))
 
 (define (state→assembly offset σ)
   (cons (pragma [content (format "version ~a" (hash-ref σ 'logic-sig-version))])

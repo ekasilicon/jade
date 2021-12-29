@@ -3,10 +3,9 @@
          racket/set
          (only-in racket/list append-map)
          "static/sumtype.rkt"
-         "static/sumtype-extra.rkt"
+         #;"static/sumtype-extra.rkt"
          "monad.rkt"
          "read-byte.rkt"
-         "logic-sig-version.rkt"
          "arithmetic-logic-unit.rkt"
          "internal-transaction.rkt"
          "prefix.rkt"

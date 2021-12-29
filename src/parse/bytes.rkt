@@ -2,7 +2,7 @@
 (require (prefix-in rkt: (only-in racket/base bytes))
          racket/match
          "base.rkt"
-         "number.rkt")
+         "uint.rkt")
 
 (define ((decode-baseXX digit-values value-width) cs)
   (apply rkt:bytes
@@ -179,5 +179,51 @@
   
   (parse-bytes "b64(aGVsbG8) 123"))
 
+#;
+(module+ main
+  (require racket/port
+           racket/pretty)
 
+  (define-syntax-rule (test-succeed expr)
+    (with-handlers ([exn:fail? (λ (e)
+                                 (displayln "TEST FAILED")
+                                 (displayln (exn-message e)))])
+      (void expr)))
 
+  (define-syntax-rule (test-fail expr)
+    (unless (with-handlers ([exn:fail? (λ (_) #t)])
+              expr
+              #f)
+      (displayln "TEST WAS EXPECTED TO FAIL BUT DID NOT")))
+
+  (test-succeed (parse-varuint "123456"))
+  (test-succeed (parse-varuint "0123456"))
+  (test-succeed (parse-varuint "0x123456"))
+  (test-fail    (parse-varuint "0x1234G"))
+  (test-fail    (parse-varuint "1234 1234"))
+  (test-fail    (parse-varuint "xyzbc"))
+
+  (test-succeed (parse-bytes "base64 ABCD"))
+  (test-succeed (parse-bytes "b64 ABCD"))
+  (test-succeed (parse-bytes "base64(ABCD)"))
+  (test-succeed (parse-bytes "b64(ABCD)"))
+  (test-succeed (parse-bytes "base32 ABCD"))
+  (test-succeed (parse-bytes "b32 ABCD"))
+  (test-succeed (parse-bytes "base32(ABCD)"))
+  (test-succeed (parse-bytes "b32(ABCD)"))
+  (test-succeed (parse-bytes "0xABCDEF12345678"))
+  (test-fail    (parse-bytes "0xABCDEF123456780"))
+  (test-fail    (parse-bytes "bose64(ABCD)"))
+  (test-succeed (parse-bytes "\"\""))
+
+  (parse-bytes "\"\"")
+  (parse-bytes "\"abc\"")
+  (parse-bytes "\"abc\\n\"")
+  (parse-bytes "\"abc\\n\\r\"")
+  (parse-bytes "\"abc\\n\\r\\t\"")
+  (parse-bytes "\"abc\\n\\r\\t\\037x7\"")
+  (parse-bytes "\"abc\\n\\r\\t\\x10\"")
+  (parse-bytes "\"string literal\\xAB\\xCD\\xFF\"")
+  
+  
+  )

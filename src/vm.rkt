@@ -380,10 +380,14 @@
         (λ (offset) (>>= get-pc (λ (pc) (goto (+ pc offset)))))]))
 
 (define vm5
-  (inc ()))
+  (λ (self super)
+    (λ (msg)
+      (error 'vm5 "implement vm5 for ~a" msg))))
 
 (define vm6
-  (inc ()))
+  (λ (self super)
+    (λ (msg)
+      (error 'vm6 "implement vm6 for ~a" msg))))
 
 (define vm-extras
   (inc (pop
