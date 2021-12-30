@@ -7,7 +7,6 @@
          "monad.rkt"
          "read-byte.rkt"
          "arithmetic-logic-unit.rkt"
-         "internal-transaction.rkt"
          "prefix.rkt"
          "vm.rkt"
          (prefix-in i: "instruction.rkt"))
