@@ -380,7 +380,19 @@
        [read-asset-params-field
         (>>= read-uint8 decode-asset-params-field)]
        [decode-asset-params-field
-        (match-lambda)]))
+        (match-lambda
+          [0  (unit (AssetTotal))]
+          [1  (unit (AssetDecimals))]
+          [2  (unit (AssetDefaultFrozen))]
+          [3  (unit (AssetUnitName))]
+          [4  (unit (AssetName))]
+          [5  (unit (AssetURL))]
+          [6  (unit (AssetMetadataHash))]
+          [7  (unit (AssetManager))]
+          [8  (unit (AssetReserve))]
+          [9  (unit (AssetFreeze))]
+          [10 (unit (AssetClawback))]
+          [11 (unit (AssetCreator))])]))
 
 (provide (sumtype-out Instruction2)
          (sumtype-out TransactionField2)

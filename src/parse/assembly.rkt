@@ -58,59 +58,28 @@
                  "\tbyte base64 ZWE=\n"
                  (bytes-immediate [value #"ea\0"])))
 
-(require (only-in racket/list take)
-         "../static/object.rkt"
-         "../instruction-control.rkt")
+(require "../instruction-control.rkt")
 
 (define (resolve-control-flow lsv directives)
-  (define-values (offset-map has-inorder-successor?)
-    (let ([o (fix (apply mix (reverse (take instruction-control-mixins lsv))))])
-      (values (o 'offset-map)
-              (o 'has-inorder-successor?))))
-  (let ([initial-ph (make-placeholder #f)])
-    (let ([phs (let loop ([directives directives]
-                          [ph initial-ph]
-                          [phs (hasheq)])
-                 (match directives
-                   [(list)
-                    (placeholder-set! ph (list))
-                    phs]
-                   [(cons directive directives)
-                    (let* ([next-ph (make-placeholder #f)]
-                           [phs (match directive
-                                  [(label ℓ)
-                                   (placeholder-set! ph next-ph)
-                                   (hash-set phs ℓ next-ph)]
-                                  [(pragma)
-                                   (placeholder-set! ph next-ph)
-                                   phs]
-                                  [instruction
-                                   (placeholder-set! ph (cons instruction next-ph))
-                                   phs])])
-                      (loop directives next-ph phs))]))])
-      (let loop ([ph initial-ph])
-        (match (placeholder-get ph)
-          [(? placeholder? ph)
-           (loop ph)]
-          [(list)
-           (void)]
-          [(cons instr next-ph)
-           (let ([instr (offset-map
-                         (match-lambda
-                           [(label ℓ)
-                            (cond
-                              [(hash-ref phs ℓ #f)
-                               => values]
-                              [else
-                               (error 'parse "unknown label ~a" ℓ)])])
-                         instr)])
-             (placeholder-set!
-              ph
-              (if (has-inorder-successor? instr)
-                (cons instr next-ph)
-                (list))))
-           (loop next-ph)]))
-      (make-reader-graph initial-ph))))
+  (let* ([initial-ph (make-placeholder #f)]
+         [phs (let loop ([directives directives]
+                         [ph initial-ph]
+                         [phs (hash)])
+                (match directives
+                  [(list)
+                   (placeholder-set! ph (list))
+                   phs]
+                  [(cons directive directives)
+                   (match directive
+                     [(label ℓ)
+                      (loop directives ph (hash-set phs (label ℓ) ph))]
+                     [(pragma)
+                      (loop directives ph phs)]
+                     [instruction
+                      (let ([next-ph (make-placeholder #f)])
+                        (placeholder-set! ph (cons instruction next-ph))
+                        (loop directives next-ph phs))])]))])
+    (resolve-CFG-placeholders lsv phs initial-ph)))
 
 (define (parse input)
   ((>> whitespace* (>>0 pragma-directive line-sentinel))

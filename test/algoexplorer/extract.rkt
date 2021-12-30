@@ -1,6 +1,5 @@
 #lang racket/base
-(require racket/cmdline
-         racket/match
+(require racket/match
          json
          net/base64)
 
@@ -17,6 +16,8 @@
 (provide extract file-extract)
 
 (module+ main
+  (require racket/cmdline)
+
   (void
    (write-bytes
     (extract (read-json (current-input-port))

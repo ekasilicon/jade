@@ -1,80 +1,90 @@
 #lang racket/base
 (require racket/match
-         racket/set
-         racket/port
-         #;"static/record.rkt"
-         "static/sumtype.rkt"
+         racket/pretty
          "static/object.rkt"
+         "static/sumtype.rkt"
          "monad.rkt"
          "read-byte.rkt"
          (prefix-in i: "instruction.rkt"))
 
 (define-sumtype Result
   (failure message)
-  (success values state index))
+  (success xs i σ))
 
 (define dis0
-  (mix monad-extras
+  (mix read-byte-extras
        monad+-extras
-       read-byte-extras
-       (inc ()
+       monad-extras
+       (inc (>>
+             read-instruction
+             process-instruction)
             [unit
-             (λ xs
-               (λ (bs s i)
-                 (success [values xs] [state s] [index i])))]
+             (λ xs (λ (bs i σ) (success xs i σ)))]
             [>>=
              (λ (m f)
-               (λ (bs s i)
-                 (match (m bs s i)
-                   [(success [values xs] [state s] [index i])
-                    ((apply f xs) bs s i)]
+               (λ (bs i σ)
+                 (match (m bs i σ)
+                   [(success xs i σ)
+                    ((apply f xs) bs i σ)]
                    [(failure message)
                     (failure message)]
                    [#f
                     #f])))]
             [mplus
-             (λ ms
-               (λ (bs s i)
-                 (ormap (λ (m) (m bs s i)) ms)))]
+             (λ ms (λ (bs i σ) (ormap (λ (m) (m bs i σ)) ms)))]
             [read-byte
-             (λ (bs s i)
+             (λ (bs i σ)
                (if (= (bytes-length bs) i)
                  #f
-                 (success [values (list (bytes-ref bs i))]
-                          [state s]
-                          [index (add1 i)])))]
+                 (success [xs (list (bytes-ref bs i))] [i (add1 i)] σ)))]
+            #;
             [fail
              (λ (template . args)
-               (λ (bs s i)
+               (λ (bs i σ)
                  (failure [message (apply format template args)])))]
             [fail/context
              (λ (make)
-               (λ (bs s i)
+               (λ (bs i σ)
                  (make (λ (template . args) (failure [message (apply format template args)])) bs i)))]
-            [stream-end
-             (λ (bs s i)
-               (if (= (bytes-length bs) i)
-                 (success [values (list)] [state s] [index i])
-                 #f))]
-            [position
-             (λ (bs s i)
-               (success [values (list i)] [state s] [index i]))]
+            [offset→destination
+             (λ (offset) (>>= position (λ (pc) (unit (+ pc offset)))))]
             [mget
              (λ (k d)
-               (λ (bs s i)
-                 (success [values (list (hash-ref s k d))] [state s] [index i])))]
+               (λ (bs i σ)
+                 (success [xs (list (hash-ref σ k d))] i σ)))]
             [mset
-             (λ (k d)
-               (λ (bs s i)
-                 (success [values (list)] [state (hash-set s k v)] [index i])))]
+             (λ (k)
+               (λ (v)
+                 (λ (bs i σ)
+                   (success [xs (list)] i [σ (hash-set σ k v)]))))]
             [mupdate
-             (λ (k d)
-               (λ (bs s i)
-                 (success [values (list)] [state (hash-update s k f d)] [index i])))]
+             (λ (k f d)
+               (λ (bs i σ)
+                 (success [xs (list)] i [σ (hash-update σ k f d)])))]
             [disassemble-instruction
              (>>= read-instruction process-instruction)]
-            [offset→destination
-             (>>= position (λ (pc) (unit (+ pc offset))))])))
+            [stream-end
+             (λ (bs i σ)
+               (if (= (bytes-length bs) i)
+                 (success [xs (list)] i σ)
+                 #f))]
+            [position
+             (λ (bs i σ) (success [xs (list i)] i σ))]
+            [disassemble-instruction-stream-inner
+             (>>= position
+                  (λ (lft)
+                    (mplus (>> stream-end
+                               (mupdate 'instructions (λ (h) (hash-set h lft (list))) (hasheqv)))
+                           (>> (mplus (>>= disassemble-instruction
+                                           (λ (instr)
+                                             (>>= position
+                                                  (λ (rgt)
+                                                    (mupdate 'instructions (λ (h) (hash-set h lft (cons instr rgt))) (hasheqv))))))
+                                      (fail/context (λ (fail bs i) (fail "unrecognized instruction at byte offset ~a: ~a" i (number->string (bytes-ref bs i) 16)))))
+                               disassemble-instruction-stream-inner))))]
+            [disassemble-instruction-stream
+             (>> (>>= position (mset 'initial))
+                 disassemble-instruction-stream-inner)])))
 
 (define dis1
   (inc (offset→destination
@@ -87,7 +97,8 @@
                #:otherwise unit)]))
 
 (define dis2
-  (inc (unit >>=)
+  (inc (offset→destination
+        unit >>=)
        [process-instruction
         (sumtype-case-lambda i:Instruction2
           [(i:Instruction1 instr)
@@ -101,7 +112,8 @@
           #:otherwise unit)]))
 
 (define dis3
-  (inc (unit)
+  (inc (offset→destination
+        unit >>=)
        [process-instruction
         (sumtype-case-lambda i:Instruction3
           [(i:Instruction2 instr)
@@ -109,7 +121,8 @@
           #:otherwise unit)]))
 
 (define dis4
-  (inc (unit >>=)
+  (inc (offset→destination
+        unit >>=)
        [process-instruction
         (sumtype-case-lambda i:Instruction4
           [(i:Instruction3 instr)
@@ -120,7 +133,8 @@
           #:otherwise unit)]))
 
 (define dis5
-  (inc (unit)
+  (inc (offset→destination
+        unit >>=)
        [process-instruction
         (sumtype-case-lambda i:Instruction5
           [(i:Instruction4 instr)
@@ -128,17 +142,130 @@
           #:otherwise unit)]))
 
 (define dis6
-  (inc (unit)
+  (inc (offset→destination
+        unit >>=)
        [process-instruction
         (sumtype-case-lambda i:Instruction5
           [(i:Instruction4 instr)
            ((super process-instruction) instr)]
           #:otherwise unit)]))
 
+(define disassemble-extras
+  (inc ()))
+
 (require "version.rkt")
 
 (define disassemble/version
   (make-*/version 'disassemble/version dis0 dis1 dis2 dis3 dis4 dis5 dis6 disassemble-extras))
+
+(require "instruction-control.rkt")
+
+(define (σ→AST lsv σ)
+  (let ([instructions (hash-ref σ 'instructions)]
+        [start-i (hash-ref σ 'initial)])
+    ; instructions is a map from a left boundary to a `(succ ,instr ,next-i)
+    ; where instr is the instruction at that boundary and next-i is the right boundary
+    ; start-i is the left boundary of the first instruction
+
+    ; this loop does a pass through the instructions
+    ; to create a map from left boundaries to placeholders
+    ; which contain the instruction sequence (itself indirected by internal placeholders)
+    (let ([phs (let loop ([i start-i]
+                          [phs (hash-set (hasheqv) start-i (make-placeholder #f))])
+                 (match (hash-ref instructions i)
+                   [(list)
+                    (placeholder-set! (hash-ref phs i) (list))
+                    phs]
+                   [(cons instr next-i)
+                    (let ([ph (make-placeholder #f)])
+                      (placeholder-set! (hash-ref phs i) (cons instr ph))
+                      (loop next-i (hash-set phs next-i ph)))]))])
+      (resolve-CFG-placeholders lsv phs (hash-ref phs start-i))
+      #;
+      (let loop ([i start-i])
+        (match (hash-ref instructions i)
+          [`(succ ,instr ,next-i)
+           (define (resolve dst make)
+             (cond
+               [(hash-ref phs dst #f)
+                => (λ (ph)
+                     (placeholder-set! (hash-ref phs i) (cons (make ph) (hash-ref phs next-i))))]
+               [else
+                (error 'disassemble "branch to byte offset ~a not on instruction boundary" dst)]))
+           (define (terminal instr)
+             (placeholder-set! (hash-ref phs i)
+                               (cons instr (list))))
+           (let* ([instr ((offset 'offset-map) )]))
+           (cond
+             [])
+           (sumtype-case i:Instruction instr
+             [(i:bz [offset dst])
+              (resolve dst (λ (ph) (i:bz [offset ph])))]
+             [(i:bnz [offset dst])
+              (resolve dst (λ (ph) (i:bnz [offset ph])))]
+             [(i:callsub [offset dst])
+              (resolve dst (λ (ph) (i:callsub [offset ph])))]
+             [(i:b [offset dst])
+              ; don't set it to the contents of the destination placeholder
+              ; because those might be changed by this loop
+              (placeholder-set! (hash-ref phs i)
+                                (list (i:b [offset (hash-ref phs dst)])))]
+             [(i:err)
+              (terminal instr)]
+             [(i:retsub)
+              (terminal instr)]
+             [(i:return)
+              (terminal instr)]
+             #:otherwise void)
+           (loop next-i)]
+          [`(done)
+           (void)]))
+      (make-reader-graph (hash-ref phs start-i)))))
+
+
+(define (disassemble bs)
+  (cond
+    [(((fix (mix read-byte-extras
+                 monad-extras
+                 (inc ()
+                      [unit
+                        (λ xs (λ (bs i) (cons xs i)))]
+                      [>>=
+                       (λ (m f)
+                         (λ (bs i)
+                           (cond
+                             [(m bs i)
+                              => (match-lambda
+                                   [(cons xs i)
+                                    ((apply f xs) bs i)])]
+                             [else
+                              #f])))]
+                      [read-byte
+                       (λ (bs i)
+                         (if (= i (bytes-length bs))
+                           #f
+                           (cons (list (bytes-ref bs i)) (add1 i))))])))
+       'read-varuint)
+      bs 0)
+     => (match-lambda
+          [(cons (list lsv) i)
+           (let ([disassemble (fix (mix (i:instruction/version lsv)
+                                        (disassemble/version lsv)))])
+             (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
+                                   bs i (hasheqv))
+               [(success [xs (list)] σ)
+                (σ→AST lsv σ)]
+               [(failure message)
+                (error 'disassemble message)]))])]
+    [else
+     (error 'disassemble "expected a logic signature version encoded as a varuint")]))
+
+(provide disassemble)
+
+
+#|
+
+
 
 #;
 (define disassemble-instruction
@@ -313,73 +440,6 @@
 
 (apply fix (take (reverse instruction-offsets) lsv))
 
-(define (σ→AST σ)
-  (let ([instructions (hash-ref σ 'instructions)]
-        [start-i (hash-ref σ 'initial)])
-    ; instructions is a map from a left boundary to a `(succ ,instr ,next-i)
-    ; where instr is the instruction at that boundary and next-i is the right boundary
-    ; start-i is the left boundary of the first instruction
-
-    ; this loop does a pass through the instructions
-    ; to create a map from left boundaries to placeholders
-    ; which contain the instruction sequence (itself indirected by internal placeholders)
-    (let ([phs (let loop ([i start-i]
-                          [phs (hash-set (hasheqv) start-i (make-placeholder #f))])
-                 (match (hash-ref instructions i)
-                   [`(succ ,instr ,next-i)
-                    (let ([ph (make-placeholder #f)])
-                      (placeholder-set! (hash-ref phs i) (cons instr ph))
-                      (loop next-i (hash-set phs next-i ph)))]
-                   [`(done)
-                    (placeholder-set! (hash-ref phs i) (list))
-                    phs]))])
-
-      ; this loop does a pass to fix instructions whose successor
-      ; isn't simply the next instruction
-      ; these instructions include terminal instructions,
-      ; such as err, return, and retsub,
-      ; and branching instructions,
-      ; such as bnz, bz, and callsub.
-      ; it also inlines b instructions.
-      (let loop ([i start-i])
-        (match (hash-ref instructions i)
-          [`(succ ,instr ,next-i)
-           (define (resolve dst make)
-             (cond
-               [(hash-ref phs dst #f)
-                => (λ (ph)
-                     (placeholder-set! (hash-ref phs i) (cons (make ph) (hash-ref phs next-i))))]
-               [else
-                (error 'disassemble "branch to byte offset ~a not on instruction boundary" dst)]))
-           (define (terminal instr)
-             (placeholder-set! (hash-ref phs i)
-                               (cons instr (list))))
-           (let* ([instr ((offset 'offset-map) )]))
-           (cond
-             [])
-           (sumtype-case i:Instruction instr
-             [(i:bz [offset dst])
-              (resolve dst (λ (ph) (i:bz [offset ph])))]
-             [(i:bnz [offset dst])
-              (resolve dst (λ (ph) (i:bnz [offset ph])))]
-             [(i:callsub [offset dst])
-              (resolve dst (λ (ph) (i:callsub [offset ph])))]
-             [(i:b [offset dst])
-              ; don't set it to the contents of the destination placeholder
-              ; because those might be changed by this loop
-              (placeholder-set! (hash-ref phs i)
-                                (list (i:b [offset (hash-ref phs dst)])))]
-             [(i:err)
-              (terminal instr)]
-             [(i:retsub)
-              (terminal instr)]
-             [(i:return)
-              (terminal instr)]
-             #:otherwise void)
-           (loop next-i)]
-          [`(done)
-           (void)]))
-      (make-reader-graph (hash-ref phs start-i)))))
 
 #;
 (provide disassemble-bytes
@@ -390,3 +450,4 @@
   (require racket/pretty)
 
   (pretty-print (disassemble-port (current-input-port))))
+|#

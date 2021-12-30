@@ -1,5 +1,7 @@
 #lang racket/base
-(require "static/object.rkt"
+(require (only-in racket/list take)
+         (only-in racket/match match)
+         "static/object.rkt"
          "static/sumtype.rkt"
          "instruction.rkt")
 
@@ -113,4 +115,39 @@
                  ((super has-inorder-successor?) instr)]
                 #:otherwise (λ (_) #t))])))
 
-(provide instruction-control-mixins)
+(define (resolve-CFG-placeholders lsv phs initial-ph)
+  (define-values (offset-map has-inorder-successor?)
+    (let ([o (fix (apply mix (reverse (take instruction-control-mixins lsv))))])
+      (values (o 'offset-map)
+              (o 'has-inorder-successor?))))
+  ; this loop does a pass to fix instructions whose successor
+  ; isn't simply the next instruction
+  ; these instructions include terminal instructions,
+  ; such as err, return, and retsub,
+  ; and branching instructions,
+  ; such as bnz, bz, and callsub.
+  (let loop ([ph initial-ph])
+    (match (placeholder-get ph)
+      [(list)
+       (void)]
+      [(cons instr next-ph)
+       (let ([instr (offset-map
+                     (λ (ℓ)
+                       (cond
+                         [(hash-ref phs ℓ #f)
+                          => values]
+                         [else
+                          (error 'parse "unknown label ~a" ℓ)]))
+                     instr)])
+         (placeholder-set!
+          ph
+          (if (has-inorder-successor? instr)
+            (cons instr next-ph)
+            (list))))
+       (loop next-ph)]))
+  (make-reader-graph initial-ph))
+
+(provide resolve-CFG-placeholders)
+
+
+
