@@ -2,11 +2,11 @@
 (require (only-in racket/list take)
          "static/object.rkt"
          "static/sumtype.rkt"
-         (prefix-in i: "instruction.rkt"))
+         (prefix-in i: "instruction/opcode.rkt"))
 
 (define vm0
   (inc (execute
-        read-instruction instruction-logic-signature-version instruction-name
+        read-instruction instruction-version instruction-name
         get-intcblock get-bytecblock
         constant
         panic check-final
@@ -22,9 +22,7 @@
        [step
         (>> (>>= read-instruction
                  (λ (instr)
-                   (>> (logic-sig-version>=
-                        (instruction-logic-signature-version instr)
-                        (instruction-name instr))
+                   (>> (logic-sig-version>= (instruction-version instr) (instruction-name instr))
                        (execute instr))))
             check-final)]
        [lookup-intcblock

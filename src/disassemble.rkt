@@ -1,23 +1,25 @@
 #lang racket/base
 (require racket/match
-         racket/pretty
-         "static/object.rkt"
          "static/sumtype.rkt"
+         "static/object.rkt"
          "monad.rkt"
          "read-byte.rkt"
-         (prefix-in i: "instruction.rkt"))
+         "version.rkt"
+         "instruction/read.rkt"
+         "instruction/control.rkt")
 
 (define-sumtype Result
   (failure message)
   (success xs i σ))
 
-(define dis0
-  (mix read-byte-extras
+(define (disassemble/version lsv)
+  (mix (instruction-control/version lsv)
+       read-byte-extras
        monad+-extras
        monad-extras
        (inc (>>
              read-instruction
-             process-instruction)
+             offset-map)
             [unit
              (λ xs (λ (bs i σ) (success xs i σ)))]
             [>>=
@@ -45,9 +47,7 @@
             [fail/context
              (λ (make)
                (λ (bs i σ)
-                 (make (λ (template . args) (failure [message (apply format template args)])) bs i)))]
-            [offset→destination
-             (λ (offset) (>>= position (λ (pc) (unit (+ pc offset)))))]
+                 (make (λ (template . args) (failure [message (apply format template args)])) bs i)))]            
             [mget
              (λ (k d)
                (λ (bs i σ)
@@ -62,7 +62,11 @@
                (λ (bs i σ)
                  (success [xs (list)] i [σ (hash-update σ k f d)])))]
             [disassemble-instruction
-             (>>= read-instruction process-instruction)]
+             (>>= read-instruction
+                  (λ (instr)
+                    (>>= position
+                         (λ (pc)
+                           (unit (offset-map (λ (offset) (+ pc offset)) instr))))))]
             [stream-end
              (λ (bs i σ)
                (if (= (bytes-length bs) i)
@@ -86,79 +90,6 @@
              (>> (>>= position (mset 'initial))
                  disassemble-instruction-stream-inner)])))
 
-(define dis1
-  (inc (offset→destination
-        unit >>=)
-       [process-instruction
-        (sumtype-case-lambda i:Instruction1
-          [(i:bnz offset)
-           (>>= (offset→destination offset)
-                (λ (dst) (unit (i:bnz [offset dst]))))]
-               #:otherwise unit)]))
-
-(define dis2
-  (inc (offset→destination
-        unit >>=)
-       [process-instruction
-        (sumtype-case-lambda i:Instruction2
-          [(i:Instruction1 instr)
-           ((super process-instruction) instr)]
-          [(i:b offset)
-           (>>= (offset→destination offset)
-                (λ (dst) (unit (i:b [offset dst]))))]
-          [(i:bz offset)
-           (>>= (offset→destination offset)
-                (λ (dst) (unit (i:bz [offset dst]))))]
-          #:otherwise unit)]))
-
-(define dis3
-  (inc (offset→destination
-        unit >>=)
-       [process-instruction
-        (sumtype-case-lambda i:Instruction3
-          [(i:Instruction2 instr)
-           ((super process-instruction) instr)]
-          #:otherwise unit)]))
-
-(define dis4
-  (inc (offset→destination
-        unit >>=)
-       [process-instruction
-        (sumtype-case-lambda i:Instruction4
-          [(i:Instruction3 instr)
-           ((super process-instruction) instr)]
-          [(i:callsub offset)
-           (>>= (offset→destination offset)
-                (λ (dst) (unit (i:callsub [offset dst]))))]
-          #:otherwise unit)]))
-
-(define dis5
-  (inc (offset→destination
-        unit >>=)
-       [process-instruction
-        (sumtype-case-lambda i:Instruction5
-          [(i:Instruction4 instr)
-           ((super process-instruction) instr)]
-          #:otherwise unit)]))
-
-(define dis6
-  (inc (offset→destination
-        unit >>=)
-       [process-instruction
-        (sumtype-case-lambda i:Instruction5
-          [(i:Instruction4 instr)
-           ((super process-instruction) instr)]
-          #:otherwise unit)]))
-
-(define disassemble-extras
-  (inc ()))
-
-(require "version.rkt")
-
-(define disassemble/version
-  (make-*/version 'disassemble/version dis0 dis1 dis2 dis3 dis4 dis5 dis6 disassemble-extras))
-
-(require "instruction-control.rkt")
 
 (define (σ→AST lsv σ)
   (let ([instructions (hash-ref σ 'instructions)]
@@ -249,12 +180,12 @@
       bs 0)
      => (match-lambda
           [(cons (list lsv) i)
-           (let ([disassemble (fix (mix (i:instruction/version lsv)
+           (let ([disassemble (fix (mix (instruction-read/version lsv)
                                         (disassemble/version lsv)))])
              (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
                                    bs i (hasheqv))
                [(success [xs (list)] σ)
-                (σ→AST lsv σ)]
+                (cons lsv (σ→AST lsv σ))]
                [(failure message)
                 (error 'disassemble message)]))])]
     [else

@@ -58,7 +58,7 @@
                  "\tbyte base64 ZWE=\n"
                  (bytes-immediate [value #"ea\0"])))
 
-(require "../instruction-control.rkt")
+(require "../instruction/control.rkt")
 
 (define (resolve-control-flow lsv directives)
   (let* ([initial-ph (make-placeholder #f)]
@@ -99,26 +99,28 @@
                                   whitespace*
                                   (p? comment)
                                   line-sentinel))])
-               (resolve-control-flow
+               (cons
                 lsv
-                (let loop ([i i])
-                  ((>> whitespace* end-of-input)
-                   input i
-                   (λ (_ i fk) (list))
-                   (λ ()
-                     (line input i (λ (ds i fk)
-                                     (match ds
-                                       [(list directive)
-                                        (if directive
-                                          (cons directive (loop i))
-                                          (loop i))]
-                                       [_
-                                        (error 'parser "expected single result")]))
-                           (λ ()
-                             (error (report input i
-                                            "an instruction"
-                                            "a comment signalled by //"
-                                            "a #pragma directive")))))))) ))]
+                (resolve-control-flow
+                 lsv
+                 (let loop ([i i])
+                   ((>> whitespace* end-of-input)
+                    input i
+                    (λ (_ i fk) (list))
+                    (λ ()
+                      (line input i (λ (ds i fk)
+                                      (match ds
+                                        [(list directive)
+                                         (if directive
+                                           (cons directive (loop i))
+                                           (loop i))]
+                                        [_
+                                         (error 'parser "expected single result")]))
+                            (λ ()
+                              (error (report input i
+                                             "an instruction"
+                                             "a comment signalled by //"
+                                             "a #pragma directive")))))))))))]
           [#f
            (error (report input 0 "#pragma version <teal-version>"))])]))
    (λ () (error (report input 0 "#pragma version <teal-version>")))))
@@ -131,6 +133,4 @@
 
   (let ([input (port->string (current-input-port))])
     (let ([directives (time (parse input))])
-      (pretty-print directives)
-      #;
-      (pretty-print (resolve-control-flow directives)))))
+      (pretty-print directives))))

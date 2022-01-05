@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/match
+(require (only-in racket/match match match-lambda failure-cont)
          "../version.rkt"
          "../static/record.rkt"
          "../static/sumtype.rkt"
@@ -7,7 +7,7 @@
          "base.rkt"
          "uint.rkt"
          "bytes.rkt"
-         (prefix-in i: "../instruction.rkt")
+         "../instruction/opcode.rkt"
          (for-syntax racket/base
                      racket/match
                      syntax/parse))
@@ -191,30 +191,30 @@
                [transaction-field (λ xs (raise (cons 'transaction-field xs)))]
                [global-field (λ xs (raise (cons 'global-field xs)))])
           (instruction-mixin
-           i:Instruction1
-           #:transaction-field i:TransactionField1
-           #:global-field i:GlobalField1)
+           Instruction1
+           #:transaction-field TransactionField1
+           #:global-field GlobalField1)
           (instruction-mixin
-           i:Instruction2
-           #:transaction-field i:TransactionField2
-           #:global-field i:GlobalField2
-           #:asset-params-field i:AssetParamsField2
-           #:asset-holding-field i:AssetHoldingField2)
+           Instruction2
+           #:transaction-field TransactionField2
+           #:global-field GlobalField2
+           #:asset-params-field AssetParamsField2
+           #:asset-holding-field AssetHoldingField2)
           (instruction-mixin
-           i:Instruction3
-           #:transaction-field i:TransactionField3
-           #:global-field i:GlobalField3)
+           Instruction3
+           #:transaction-field TransactionField3
+           #:global-field GlobalField3)
           (instruction-mixin
-           i:Instruction4
-           #:transaction-field i:TransactionField4)
+           Instruction4
+           #:transaction-field TransactionField4)
           (instruction-mixin
-           i:Instruction5
-           #:transaction-field i:TransactionField5
-           #:global-field i:GlobalField5
-           #:asset-params-field i:AssetParamsField5
-           #:app-params-field i:AppParamsField5)
+           Instruction5
+           #:transaction-field TransactionField5
+           #:global-field GlobalField5
+           #:asset-params-field AssetParamsField5
+           #:app-params-field AppParamsField5)
           (instruction-mixin
-           i:Instruction6)
+           Instruction6)
           (inc ()))])
     (λ (lsv) ((fix (parser-object/version lsv)) 'instruction))))
 
@@ -223,25 +223,25 @@
 (module+ test
   (parse-success (instruction-parser/version 1)
                  "err"
-                 (i:err))
+                 (err))
 
   (parse-success (instruction-parser/version 1)
                  "txn Sender"
-                 (i:txn [field (i:Sender)]))
+                 (txn [field (Sender)]))
 
   (parse-success (instruction-parser/version 2)
                  "addw"
-                 (i:addw))
+                 (addw))
 
   (parse-success (instruction-parser/version 2)
                  "bnz END"
-                 (i:bnz [offset (label [ℓ 'END])]))
+                 (bnz [offset (label [ℓ 'END])]))
 
   (parse-success (instruction-parser/version 2)
                  "substring 0 10"
-                 (i:substring [start 0] [end 10]))
+                 (substring [start 0] [end 10]))
 
   (parse-success (instruction-parser/version 3)
                  "gtxnsa Fee 12"
-                 (i:gtxnsa [field (i:Fee)] [array-index 12])))
+                 (gtxnsa [field (Fee)] [array-index 12])))
 
