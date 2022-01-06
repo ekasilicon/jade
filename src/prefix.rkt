@@ -25,6 +25,11 @@
 
 (provide prefix-read-byte)
 
+(define read-prefix
+  ((fix prefix-read-byte) 'read-varuint))
+
+(provide read-prefix)
+
 (module+ main
-  (((fix prefix-read-byte) 'read-varuint) (bytes 127 1 2 3))
-  (((fix prefix-read-byte) 'read-varuint) (bytes 128 127 1 2 3)))
+  (read-prefix (bytes 127 1 2 3))
+  (read-prefix (bytes 128 127 1 2 3)))

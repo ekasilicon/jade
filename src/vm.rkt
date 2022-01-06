@@ -56,8 +56,9 @@
         btoi itob len
         ! \|\| &&
         primitive-apply
-        get-bytecode
-        get-pc set-pc
+        ;get-bytecode
+        ;get-pc set-pc
+        jump
         logic-sig-version
         panic
         unit >>= >>)
@@ -192,22 +193,7 @@
           [(i:dup)
            (>>= (pop) (λ (x) (push x x)))])]
        [continue
-        (unit)]
-       [jump
-        (λ (offset)
-          (if (< offset 0)
-            (>>= logic-sig-version
-                 (λ (lsv) (panic "cannot jump backwards (offset ~a) in LogicSigVersion ~a" offset lsv)))
-            (>>= get-pc (λ (pc) (goto (+ pc offset))))))]
-       [goto
-        (λ (pc)
-          (if (< pc 0)
-            (panic "cannot go to negative counter ~a" pc)
-            (>>= get-bytecode
-                 (λ (bc)
-                   (if (>= pc (bytes-length bc))
-                     (panic "cannot go to ~a at or past end of bytecode of length ~a" pc (bytes-length bc))
-                     (set-pc pc))))))]))
+        (unit)]))
 
 
 
@@ -221,8 +207,8 @@
         transaction-array group-transaction-array
         app-local-get app-local-get-ex app-local-put app-local-del
         app-global-get app-global-get-ex app-global-put app-global-del
-        get-bytecode
-        get-pc set-pc
+        ;get-bytecode
+        ;get-pc set-pc
         push pop
         primitive-apply
         in-mode
@@ -288,10 +274,11 @@
                (primitive-apply app-global-del 1))]
           [(i:asset_holding_get [field f])
            (>> (in-mode 'Application "asset_holding_get")
-               (>>= (pop 2) (λ (a b) (asset-holding-get a b f))))]
+               (>>= (>>= (pop 2) (λ (a b) (asset-holding-get a b f))) push))]
           [(i:asset_params_get [field f])
            (>> (in-mode 'Application "asset_params_get")
                (>>= (>>= (pop) (λ (a) (asset-params-get a f))) push))])]
+       #;
        [goto
         (λ (pc)
           (if (< pc 0)

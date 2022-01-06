@@ -121,8 +121,31 @@
                   #;
                   [(ormap (λ (interp) (interp c)) (map car interps)) => values]
                   [else
-                   #;(pretty-print c)
-                   (unit)])])]
+                   (unit)
+                   #;
+                   (>> (>>= (get pc+ (set))
+                            (λ (pc+)
+                              (displayln "pc+")
+                              (pretty-print pc+)
+                              (unit)))
+                       (>>= (get pc- (set))
+                            (λ (pc-)
+                              (displayln "pc-")
+                              (pretty-print pc-)
+                              (unit)))
+                       (>>= (unit)
+                            (λ ()
+                              (displayln 'assume)
+                              (pretty-print c)
+                              (unit)))
+                       (>>= (unit)
+                            (λ ()
+                              (if (begin
+                                    (display "consistent? ")
+                                    (flush-output)
+                                    (read))
+                                (update pc+ (λ (pc+) (set-add pc+ c)) (set))
+                                mzero))))])])]
             [refute
              (match-lambda
                [`(! 0 ,c) (assume c)]
@@ -149,8 +172,31 @@
                   #;
                   [(ormap (λ (interp) (interp c)) (map cdr interps)) => values]
                   [else
-                   #;(pretty-print c)
-                   (unit)])])]
+                   (unit)
+                   #;
+                   (>> (>>= (get pc+ (set))
+                            (λ (pc+)
+                              (displayln "pc+")
+                              (pretty-print pc+)
+                              (unit)))
+                       (>>= (get pc- (set))
+                               (λ (pc-)
+                                 (displayln "pc-")
+                                 (pretty-print pc-)
+                                 (unit)))
+                       (>>= (unit)
+                            (λ ()
+                              (displayln 'refute)
+                              (pretty-print c)
+                              (unit)))
+                       (>>= (unit)
+                            (λ ()
+                              (if (begin
+                                    (display "consistent? ")
+                                    (flush-output)
+                                    (read))
+                                (update pc- (λ (pc-) (set-add pc- c)) (set))
+                                mzero))))])])]
             [transaction unit]
             [group-transaction (p unit group-transaction 1)]
             [transaction-array (p unit transaction-array 1)]
@@ -246,7 +292,8 @@
                                              (lookup al)
                                              (unit val 1))])])
                       lookup)))]
-            [asset-holding-get (p unit asset-holding-get 1)]
+            [asset-holding-get (p unit asset-holding-get 2)]
+            [asset-params-get (p unit asset-params-get 2)]
             [load
              (λ (i)
                (>>= (get scratch-space (hasheqv))
@@ -260,6 +307,26 @@
             [! (p unit ! 1)]
             [&& (p unit && 1)]
             [\|\| (p unit \|\| 1)])
+       (inc (>>=
+             logic-sig-version
+             set-pc get-pc
+             get-bytecode
+             panic)
+            [jump
+             (λ (offset)
+               (if (< offset 0)
+                 (>>= logic-sig-version
+                      (λ (lsv) (panic "cannot jump backwards (offset ~a) in LogicSigVersion ~a" offset lsv)))
+                 (>>= get-pc (λ (pc) (goto (+ pc offset))))))]
+            [goto
+             (λ (pc)
+               (if (< pc 0)
+                 (panic "cannot go to negative counter ~a" pc)
+                 (>>= get-bytecode
+                      (λ (bc)
+                        (if (>= pc (bytes-length bc))
+                          (panic "cannot go to ~a at or past end of bytecode of length ~a" pc (bytes-length bc))
+                          (set-pc pc))))))])
        (instruction-read/version lsv)
        (instruction-version/version lsv)
        (inc ()
@@ -298,35 +365,39 @@
 (require racket/pretty)
 
 (define (analyze vm ς)
-  (let ([→ (vm 'step)])
-    (let loop ([ς ς])
-      (foldl
-       (λ (r fs)
-         (match r
-           [(underway [values (list)] ς)
-            (loop ς)]
-           [(failure! message)
-            (printf "failure: ~a\n" message)
-            fs]
-           [(returned code)
-            (displayln code)
-            (pretty-print ς)
-            (match code
-              [1
-               (set-add fs ς)]
-              [0
-               fs])
-            #;(displayln "success")
-            #;(pretty-print code)
-            #;(pretty-print (hash-ref ς 'OnCompletion))
-            #;(pretty-print (hash-ref ς 'RekeyTo))
-            #;
-            (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
-            #;
-            fs]))
-       (set)
-       (→ ς))))
-  )
+  (let ([→ (vm 'step)]
+        [n 0]
+        [m 0])
+    (begin0 (let loop ([ς ς])
+              (foldl
+               (λ (r fs)
+                 (match r
+                   [(underway [values (list)] ς)
+                    (loop ς)]
+                   [(failure! message)
+                    (set! m (add1 m))
+                    fs]
+                   [(returned code)
+                    (match code
+                      [1
+                       (set-add fs ς)]
+                      [0
+                       (set! n (add1 n))
+                       fs])
+                    #;(displayln "success")
+                    #;(pretty-print code)
+                    #;(pretty-print (hash-ref ς 'OnCompletion))
+                    #;(pretty-print (hash-ref ς 'RekeyTo))
+                    #;
+                    (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
+                    #;
+                    fs]))
+               (set)
+               (→ ς)))
+      #;
+      (printf "analyze returned with 0 state count is ~a\n" n)
+      #;
+      (printf "analyze failure state count is ~a\n" m))))
 
 #;
 (require (prefix-in d: "disassemble.rkt"))
@@ -360,7 +431,7 @@
                       'LocalNumUint       local-num-uint
                       'GlobalState        global-state
                       'MappedConstants    mapped-constants)])
-       (match (((fix prefix-read-byte) 'read-varuint) approval-program) 
+       (match (read-prefix approval-program) 
          [(cons lsv bytecode)
           (if (<= lsv 3)
             (time
@@ -375,9 +446,9 @@
                              [ς (hash-set ς 'intcblock       (list))]
                              [ς (hash-set ς 'bytecblock      (list))])
                         ς)))
-            (error 'standard "does not support LogicSigVersion = ~a > 3" lsv))]
+            (error 'unconstrained-property-analysis "does not support LogicSigVersion = ~a > 3" lsv))]
          [#f
-          (error 'standard "unable to read initial logic signature version")]))]))
+          (error 'unconstrained-property-analysis "unable to read initial logic signature version")]))]))
 
 (define (analyze/raw-binary program-type bs constants)
   42)
@@ -419,6 +490,7 @@ Input JSON did not match expected format.
 (Was it produced by the Algorand API v2?)
 MESSAGE
                 )
+     #;
      (exit 255)]))
 
 (provide analyze/raw-binary

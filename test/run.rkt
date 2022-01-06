@@ -1,28 +1,48 @@
 #lang racket/base
 (require racket/match
+         racket/set
          racket/port
          racket/pretty)
 
-(require "../src/parse.rkt")
-
-(for-each
- (λ (path)
-   (displayln path)
-   (pretty-print
-    (parse (call-with-input-file path port->string))))
- (directory-list "showcase" #:build? #t)) 
-
-(require "algoexplorer/extract.rkt"
+(require "../src/parse.rkt"
+         "algoexplorer/extract.rkt"
          "../src/disassemble.rkt"
-         "../src/unconstrained-property-analysis.rkt")
+         "../src/unconstrained-property-analysis.rkt"
+         "../src/debug.rkt")
 
-(for-each
- (λ (path)
-   (displayln path)
-   (void (time (disassemble (file-extract path 'approval-program))))
-   (let ([bs (call-with-input-file path port->bytes)])
-     (with-handlers (#;[exn:fail? (λ (e) (displayln (exn-message e)))]
-                        )
-       (pretty-print (time (analyze/json-package bs (hash)))))))
- (directory-list "algoexplorer/mainnet" #:build? #t))
+(match (current-command-line-arguments)
+  [(vector "showcase")
+   (for-each
+    (λ (path)
+      (displayln path)
+      (pretty-print
+       (parse (call-with-input-file path port->string))))
+    (directory-list "showcase" #:build? #t))]
+  [(vector "algoexplorer")
+   (for-each
+    (λ (path)
+      (displayln path)
+      (void (time (disassemble (file-extract path 'approval-program))))
+      (let ([bs (call-with-input-file path port->bytes)])
+        (with-handlers ([exn:fail? (λ (e) (displayln (exn-message e)))])
+          (let* ([rs (analyze/json-package bs (hash))]
+                 [n (set-count rs)])
+            (if (zero? n)
+              (begin
+                (displayln "no states")
+                (pretty-print (disassemble (file-extract path 'approval-program))))
+              (displayln n))))))
+    (directory-list "algoexplorer/mainnet" #:build? #t))]
+  [(vector "debug" paths ...)
+   (for-each
+    (λ (path)
+      (displayln path)
+      (debug (disassemble (file-extract path 'approval-program))))
+    paths)])
+
+ 
+
+
+
+
 
