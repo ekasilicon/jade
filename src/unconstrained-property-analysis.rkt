@@ -1,5 +1,5 @@
 #lang racket/base
-(require (only-in racket/match match match-lambda failure-cont)
+(require (only-in racket/match match match-lambda match-let failure-cont ==)
          (only-in racket/list append-map)
          racket/set
          "static/object.rkt"
@@ -8,31 +8,32 @@
          "monad.rkt"
          "prefix.rkt"
          "vm.rkt"
+         (prefix-in i: "instruction/opcode.rkt")
          "instruction/read.rkt"
          "instruction/version.rkt")
 
 (define-sumtype Result
-  (underway values ς)
+  (underway values ς ctx)
   (failure! message)
-  (returned code))
+  (returned code ctx))
 
 ; get : key -> UPA a
 (define-syntax get
   (syntax-rules ()
     [(_ key)
-     (λ (ς) (list (underway [values (list (hash-ref ς 'key))] ς)))]
+     (λ (ς ctx) (list (underway [values (list (hash-ref ς 'key))] ς ctx)))]
     [(_ key default)
-     (λ (ς) (list (underway [values (list (hash-ref ς 'key default))] ς)))]))
+     (λ (ς ctx) (list (underway [values (list (hash-ref ς 'key default))] ς ctx)))]))
 ; set : key a -> UPA ()
 (define-syntax-rule (put key val)
-  (λ (ς) (list (underway [values (list)] [ς (hash-set ς 'key val)]))))
+  (λ (ς ctx) (list (underway [values (list)] [ς (hash-set ς 'key val)] ctx))))
 ; update : key (a a -> a) [a] -> UPA ()
 (define-syntax update
   (syntax-rules ()
     [(_ key f)
-     (λ (ς) (list (underway [values (list)] [ς (hash-update ς 'key f)])))]
+     (λ (ς ctx) (list (underway [values (list)] [ς (hash-update ς 'key f)] ctx)))]
     [(_ key f iv)
-     (λ (ς) (list (underway [values (list)] [ς (hash-update ς 'key f iv)])))]))
+     (λ (ς ctx) (list (underway [values (list)] [ς (hash-update ς 'key f iv)] ctx)))]))
 
 (define-syntax p
   (syntax-rules ()
@@ -47,14 +48,14 @@
             [sha256 (p unit sha256 1)]
             [panic
              (λ (template . args)
-               (λ (ς) (list (failure! [message (apply format template args)]))))]
+               (λ (ς ctx) (list (failure! [message (apply format template args)]))))]
             [return
              (λ (code)
                (if0 code
-                    (λ (ς) (list (returned [code 0])))
-                    (λ (ς) (list (returned [code 1])))))]
+                 (λ (ς ctx) (list (returned [code 0] ctx)))
+                 (λ (ς ctx) (list (returned [code 1] ctx)))))]
             [check-final
-             (>>= (get bytecode)
+             (>>= get-bytecode
                   (λ (bc)
                     (>>= (get pc)
                          (λ (pc)
@@ -97,55 +98,28 @@
                       (>> (assume x) m₁)))]               
             [assume
              (match-lambda
-               [`(! 0 ,c) (refute c)]
+               [`(! 0 ,c)
+                (refute c)]
                [`(&& 0 ,c₀ ,c₁)
                 (>> (assume c₀)
                     (assume c₁))]
                [`(\|\| 0 ,c₀ ,c₁)
                 (mplus (assume c₀)
                        (assume c₁))]
+               [(? exact-nonnegative-integer? x)
+                (if (zero? x) mzero (unit))]
+               [`(== 0
+                     ,(? exact-nonnegative-integer? x₀)
+                     ,(? exact-nonnegative-integer? x₁))
+                (if (= x₀ x₁) (unit) mzero)]
+               [`(== 0
+                     ,(? bytes? bs₀)
+                     ,(? bytes? bs₁))
+                (if (bytes=? bs₀ bs₁) (unit) mzero)]
                [`(== 0 ,c₀ ,c₁)
-                (cond
-                  [(and (exact-nonnegative-integer? c₀)
-                        (exact-nonnegative-integer? c₁))
-                   (if (= c₀ c₁) (unit) mzero)]
-                  [(and (bytes? c₀)
-                        (bytes? c₁))
-                   (if (bytes=? c₀ c₁) (unit) mzero)]
-                  [else
-                   (failure-cont)])]
+                (if (equal? c₀ c₁) (unit) (failure-cont))]
                [c
-                (cond
-                  [(exact-nonnegative-integer? c)
-                   (if (zero? c) mzero (unit))]
-                  #;
-                  [(ormap (λ (interp) (interp c)) (map car interps)) => values]
-                  [else
-                   (unit)
-                   #;
-                   (>> (>>= (get pc+ (set))
-                            (λ (pc+)
-                              (displayln "pc+")
-                              (pretty-print pc+)
-                              (unit)))
-                       (>>= (get pc- (set))
-                            (λ (pc-)
-                              (displayln "pc-")
-                              (pretty-print pc-)
-                              (unit)))
-                       (>>= (unit)
-                            (λ ()
-                              (displayln 'assume)
-                              (pretty-print c)
-                              (unit)))
-                       (>>= (unit)
-                            (λ ()
-                              (if (begin
-                                    (display "consistent? ")
-                                    (flush-output)
-                                    (read))
-                                (update pc+ (λ (pc+) (set-add pc+ c)) (set))
-                                mzero))))])])]
+                (unit)])]
             [refute
              (match-lambda
                [`(! 0 ,c) (assume c)]
@@ -155,48 +129,20 @@
                [`(\|\| 0 ,c₀ ,c₁)
                 (>> (refute c₀)
                     (refute c₁))]
+               [(? exact-nonnegative-integer? x)
+                (if (zero? x) (unit) mzero)]
+               [`(== 0
+                     ,(? exact-nonnegative-integer? x₀)
+                     ,(? exact-nonnegative-integer? x₁))
+                (if (= x₀ x₁) mzero (unit))]
+               [`(== 0
+                     ,(? bytes? bs₀)
+                     ,(? bytes? bs₁))
+                (if (bytes=? bs₀ bs₁) mzero (unit))]
                [`(== 0 ,c₀ ,c₁)
-                (cond
-                  [(and (exact-nonnegative-integer? c₀)
-                        (exact-nonnegative-integer? c₁))
-                   (if (= c₀ c₁) mzero (unit))]
-                  [(and (bytes? c₀)
-                        (bytes? c₁))
-                   (if (bytes=? c₀ c₁) mzero (unit))]
-                  [else
-                   (failure-cont)])]
+                (if (equal? c₀ c₁) mzero (failure-cont))]
                [c
-                (cond
-                  [(exact-nonnegative-integer? c)
-                   (if (zero? c) (unit) mzero)]
-                  #;
-                  [(ormap (λ (interp) (interp c)) (map cdr interps)) => values]
-                  [else
-                   (unit)
-                   #;
-                   (>> (>>= (get pc+ (set))
-                            (λ (pc+)
-                              (displayln "pc+")
-                              (pretty-print pc+)
-                              (unit)))
-                       (>>= (get pc- (set))
-                               (λ (pc-)
-                                 (displayln "pc-")
-                                 (pretty-print pc-)
-                                 (unit)))
-                       (>>= (unit)
-                            (λ ()
-                              (displayln 'refute)
-                              (pretty-print c)
-                              (unit)))
-                       (>>= (unit)
-                            (λ ()
-                              (if (begin
-                                    (display "consistent? ")
-                                    (flush-output)
-                                    (read))
-                                (update pc- (λ (pc-) (set-add pc- c)) (set))
-                                mzero))))])])]
+                (unit)])]
             [transaction unit]
             [group-transaction (p unit group-transaction 1)]
             [transaction-array (p unit transaction-array 1)]
@@ -305,12 +251,25 @@
                              (unit 0))]))))]
             [store (λ (i x) (update scratch-space (λ (ss) (hash-set ss i x)) (hasheqv)))]
             [! (p unit ! 1)]
-            [&& (p unit && 1)]
-            [\|\| (p unit \|\| 1)])
+            [&&
+             (λ (x y)
+               (if (and (exact-nonnegative-integer? x)
+                        (exact-nonnegative-integer? y))
+                 (unit (if (or (zero? x)
+                               (zero? y))
+                         0 1))
+                 (unit `(&& 0 ,x ,y))))]
+            [\|\|
+             (λ (x y)
+               (if (and (exact-nonnegative-integer? x)
+                        (exact-nonnegative-integer? y))
+                 (unit (if (and (zero? x)
+                                (zero? y))
+                         0 1))
+                 (unit `(\|\| 0 ,x ,y))))])
        (inc (>>=
              logic-sig-version
              set-pc get-pc
-             get-bytecode
              panic)
             [jump
              (λ (offset)
@@ -322,7 +281,7 @@
              (λ (pc)
                (if (< pc 0)
                  (panic "cannot go to negative counter ~a" pc)
-                 (>>= get-bytecode
+                 (>>= (get bytecode)
                       (λ (bc)
                         (if (>= pc (bytes-length bc))
                           (panic "cannot go to ~a at or past end of bytecode of length ~a" pc (bytes-length bc))
@@ -345,59 +304,44 @@
                                  (unit (bytes-ref bc pc))))))))])
        (inc (unit)
             [logic-sig-version
-             (get LogicSigVersion)])
+             (get logic-sig-version)])
        monad+-extras
        (inc ()
             [mplus
-             (λ ms (λ (ς) (apply append (map (λ (m) (m ς)) ms))))])
+             (λ ms (λ (ς ctx) (apply append (map (λ (m) (m ς ctx)) ms))))])
        monad-extras
        (inc ()
-            [unit (λ values (λ (ς) (list (underway values ς))))]
+            [unit (λ values (λ (ς ctx) (list (underway values ς ctx))))]
             [>>= (λ (m f)
-                   (λ (ς)
+                   (λ (ς ctx)
                      (append-map
                       (sumtype-case-lambda Result
-                        [(underway [values xs] ς)
-                         ((apply f xs) ς)]
+                        [(underway [values xs] ς ctx)
+                         ((apply f xs) ς ctx)]
                         #:otherwise list)
-                      (m ς))))])))
+                      (m ς ctx))))])))
 
 (require racket/pretty)
 
-(define (analyze vm ς)
-  (let ([→ (vm 'step)]
-        [n 0]
-        [m 0])
-    (begin0 (let loop ([ς ς])
-              (foldl
-               (λ (r fs)
-                 (match r
-                   [(underway [values (list)] ς)
-                    (loop ς)]
-                   [(failure! message)
-                    (set! m (add1 m))
-                    fs]
-                   [(returned code)
-                    (match code
-                      [1
-                       (set-add fs ς)]
-                      [0
-                       (set! n (add1 n))
-                       fs])
-                    #;(displayln "success")
-                    #;(pretty-print code)
-                    #;(pretty-print (hash-ref ς 'OnCompletion))
-                    #;(pretty-print (hash-ref ς 'RekeyTo))
-                    #;
-                    (pretty-print (foldl (λ (id ς) (hash-remove ς id)) ς '(ApprovalProgram ClearStateProgram bytecode)))
-                    #;
-                    fs]))
-               (set)
-               (→ ς)))
-      #;
-      (printf "analyze returned with 0 state count is ~a\n" n)
-      #;
-      (printf "analyze failure state count is ~a\n" m))))
+(define (analyze vm ς ctx)
+  (let ([→ (vm 'step)])
+    (let loop ([ς ς]
+               [ctx ctx])
+      (foldl
+       (λ (r fs)
+         (match r
+           [(underway [values (list)] ς ctx)
+            (loop ς ctx)]
+           [(failure! message)
+            fs]
+           [(returned code ctx)
+            (match code
+              [1
+               (set-add fs ctx)]
+              [0
+               fs])]))
+       (set)
+       (→ ς ctx)))))
 
 #;
 (require (prefix-in d: "disassemble.rkt"))
@@ -418,37 +362,44 @@
   (match ctx
     [(execution-context approval-program
                         clear-state-program
-                           global-num-byte-slice
-                           global-num-uint
-                           local-num-byte-slice
-                           local-num-uint
-                           global-state)
-     (let ([ς (hasheq 'ApprovalProgram    approval-program
-                      'ClearStateProgram  clear-state-program
-                      'GlobalNumByteSlice global-num-byte-slice
-                      'GlobalNumUint      global-num-uint
-                      'LocalNumByteSlice  local-num-byte-slice
-                      'LocalNumUint       local-num-uint
-                      'GlobalState        global-state
-                      'MappedConstants    mapped-constants)])
-       (match (read-prefix approval-program) 
-         [(cons lsv bytecode)
-          (if (<= lsv 3)
-            (time
-             (analyze (fix (make-vm lsv))
-                      (let* ([ς (hash-set ς 'LogicSigVersion lsv)]
-                             [ς (hash-set ς 'OnCompletion    (seteq 0 1 2 4 5))]
-                             [ς (hash-set ς 'RekeyTo         #f)]
-                             [ς (hash-set ς 'bytecode        bytecode)]
-                             [ς (hash-set ς 'pc              0)]
-                             [ς (hash-set ς 'stack           (list))]
-                             [ς (hash-set ς 'scratch-space   (hasheqv))]
-                             [ς (hash-set ς 'intcblock       (list))]
-                             [ς (hash-set ς 'bytecblock      (list))])
-                        ς)))
-            (error 'unconstrained-property-analysis "does not support LogicSigVersion = ~a > 3" lsv))]
-         [#f
-          (error 'unconstrained-property-analysis "unable to read initial logic signature version")]))]))
+                        global-num-byte-slice
+                        global-num-uint
+                        local-num-byte-slice
+                        local-num-uint
+                        global-state)
+     (match (read-prefix approval-program) 
+       [(cons lsv bytecode)
+        (if (<= lsv 3)
+          (let ([ctxs (time
+                       (analyze (fix (make-vm lsv))
+                                (hasheq 'logic-sig-version lsv
+                                        'bytecode          bytecode
+                                        'pc                0
+                                        'stack             (list)
+                                        'scratch-space     (hasheqv)
+                                        'intcblock         (list)
+                                        'bytecblock        (list)
+                                        'mapped-constants  mapped-constants)
+                                (list (hash (i:Receiver)           #f
+                                            (i:OnCompletion)       (seteqv 0 1 2 4 5)
+                                            (i:ApprovalProgram)    approval-program
+                                            (i:ClearStateProgram)  clear-state-program
+                                            (i:RekeyTo)            `(???)
+                                            (i:GroupIndex)         #f
+                                            (i:GlobalNumUint)      global-num-uint
+                                            (i:GlobalNumByteSlice) global-num-byte-slice
+                                            (i:LocalNumUint)       local-num-uint
+                                            (i:LocalNumByteSlice)  local-num-byte-slice)
+                                      (hash (i:LogicSigVersion) (for/set ([i (in-range 1 lsv)]) i)
+                                            (i:GroupSize)       (for/set ([i (in-range 16)]) (add1 i)))
+                                      global-state)))])
+            (for/set ([ctx (in-set ctxs)])
+              (match-let ([(list txn glbl glbl-state) ctx])
+                (hash (i:OnCompletion) (hash-ref txn (i:OnCompletion))
+                      (i:RekeyTo)      (hash-ref txn (i:RekeyTo)))))) 
+          (error 'unconstrained-property-analysis "does not support LogicSigVersion = ~a > 3" lsv))]
+       [#f
+        (error 'unconstrained-property-analysis "unable to read initial logic signature version")])]))
 
 (define (analyze/raw-binary program-type bs constants)
   42)
@@ -533,20 +484,7 @@ MESSAGE
                                   [(equal? t₀ t₁)
                                    (unit)]
                                   [else
-                                   (letrec ([present? (match-lambda
-                                                        [(i:OnCompletion)
-                                                         #t]
-                                                        [(i:RekeyTo)
-                                                         #t]
-                                                        [`(,_ . ,ts)
-                                                         (ormap present? ts)]
-                                                        [_
-                                                         #f])])
-                                     (if (or (present? t₀)
-                                             (present? t₁))
-                                       (>>= (get OnCompletion)
-                                            (match-lambda))
-                                       (unit)))])]
+                                   ])]
                                [_ #f])]
                      [refute (match-lambda
                                [`(== ,t₀ ,t₁)

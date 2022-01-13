@@ -31,7 +31,10 @@
               (begin
                 (displayln "no states")
                 (pretty-print (disassemble (file-extract path 'approval-program))))
-              (displayln n))))))
+              (begin
+                (displayln n)
+                (for ([r (in-set rs)])
+                  (pretty-print r))))))))
     (directory-list "algoexplorer/mainnet" #:build? #t))]
   [(vector "debug" paths ...)
    (for-each
