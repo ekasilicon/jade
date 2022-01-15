@@ -1,5 +1,6 @@
 #lang racket/base
-(require (only-in racket/list take)
+(require (only-in racket/match match-lambda)
+         (only-in racket/list take)
          "static/object.rkt"
          "static/sumtype.rkt"
          (prefix-in i: "instruction/opcode.rkt"))
@@ -22,7 +23,11 @@
        [step
         (>> (>>= read-instruction
                  (λ (instr)
-                   (>> (logic-sig-version>= (instruction-version instr) (instruction-name instr))
+                   (>> (let ([lsv (instruction-version instr)])
+                         (if lsv
+                           (logic-sig-version>= lsv (instruction-name instr))
+                           ; instr is int or bytes (a pseudo-instruction)
+                           (unit))) 
                        (execute instr))))
             check-final)]
        [lookup-intcblock
@@ -377,6 +382,14 @@
 (define vm-extras
   (inc (pop
         unit >>= >>)
+       [execute
+        (match-lambda
+          [(i:varuint-immediate value)
+           (push value)]
+          [(i:bytes-immediate value)
+           (push value)]
+          [instr
+           ((super execute) instr)])]
        [pop
         (λ ([n 1])
           (let loop ([n n]

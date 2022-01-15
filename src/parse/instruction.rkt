@@ -245,3 +245,21 @@
                  "gtxnsa Fee 12"
                  (gtxnsa [field (Fee)] [array-index 12])))
 
+(define int-parser
+  (make-instruction-parser "int" (λ (value) (varuint-immediate value)) guarded-varuint))
+
+(module+ test
+  (parse-success int-parser
+                 "int 25"
+                 (varuint-immediate [value 25])))
+
+(define byte-parser
+  (make-instruction-parser "byte" (λ (value) (bytes-immediate value)) guarded-bytes))
+
+(module+ test
+  (parse-success byte-parser
+                 "byte base64 ZWE="
+                 (bytes-immediate [value #"ea"])))
+
+(provide int-parser
+         byte-parser)

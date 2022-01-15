@@ -1,6 +1,6 @@
 #lang racket/base
 (require (only-in racket/list take)
-         (only-in racket/match match)
+         (only-in racket/match match match-lambda)
          "../static/sumtype.rkt"
          "../static/object.rkt"
          "../version.rkt"
@@ -118,7 +118,23 @@
            [(Instruction5 instr)
             ((super has-inorder-successor?) instr)]
            #:otherwise (λ (_) #t))])
-   (inc ())))
+   (inc ()
+        [offset
+         (match-lambda
+           [(varuint-immediate) #f]
+           [(bytes-immediate) #f]
+           [instr ((super offset) instr)])]
+        [offset-map
+         (λ (f instr)
+           (match instr
+             [(varuint-immediate value) (varuint-immediate value)]
+             [(bytes-immediate value) (bytes-immediate value)]
+             [instr ((super offset-map) f instr)]))]
+        [has-inorder-successor?
+         (match-lambda
+           [(varuint-immediate) #t]
+           [(bytes-immediate) #t]
+           [instr ((super has-inorder-successor?) instr)])])))
 
 (provide instruction-control/version)
 
@@ -139,18 +155,21 @@
        (void)]
       [(cons instr next-ph)
        (let ([instr (offset-map
-                     (λ (ℓ)
+                     (λ (offset)
                        (cond
-                         [(hash-ref phs ℓ #f)
+                         [(hash-ref phs offset #f)
                           => values]
                          [else
-                          (error 'parse "unknown label ~a" ℓ)]))
+                          (error 'control "invalid offset ~a" offset)]))
                      instr)])
          (placeholder-set!
           ph
-          (if (has-inorder-successor? instr)
-            (cons instr next-ph)
-            (list))))
+          (cons instr
+                ; instructions such as return, b, and err
+                ; never proceed to the next instruction
+                (if (has-inorder-successor? instr)
+                  next-ph
+                  (list)))))
        (loop next-ph)]))
   (make-reader-graph initial-ph))
 

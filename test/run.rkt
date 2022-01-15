@@ -15,8 +15,9 @@
    (for-each
     (λ (path)
       (displayln path)
-      (pretty-print
-       (parse (call-with-input-file path port->string))))
+      (let ([rs (time (analyze/assembly (call-with-input-file path port->string)))])
+        (for ([r (in-set rs)])
+          (pretty-print r))))
     (directory-list "showcase" #:build? #t))]
   [(vector "algoexplorer")
    (for-each

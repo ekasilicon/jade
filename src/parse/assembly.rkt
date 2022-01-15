@@ -25,29 +25,14 @@
   (>> (literal "//")
       (lift (λ (cs) (apply string cs)) (p* (p- (cc void) line-sentinel)))))
 
-(define label-declaration
-  (>>0 label-identifier
-       space*
-       (literal ":")))
-
-(record varuint-immediate (value))
-
-(define int-parser
-  (make-instruction-parser "int" (λ (value) (varuint-immediate value)) guarded-varuint))
-
+#;
 (module+ test
-  (parse-success int-parser
-                 "int 25"
-                 (varuint-immediate [value 25])))
-
-(record bytes-immediate (value))
-
-(define byte-parser
-  (make-instruction-parser "byte" (λ (value) (bytes-immediate value)) guarded-bytes))
-
-(module+ test
-  (parse-success byte-parser
-                 "byte base64 ZWE="
+  (parse-success (>> whitespace*
+                     (>>0 (p? byte-parser)
+                          whitespace*
+                          (p? comment)
+                          line-sentinel))
+                 "\tbyte base64 ZWE=\n"
                  (bytes-immediate [value #"ea\0"]))
 
   (parse-success (>> whitespace*
@@ -55,8 +40,13 @@
                           whitespace*
                           (p? comment)
                           line-sentinel))
-                 "\tbyte base64 ZWE=\n"
+                 "\tbyte base64 ZWE= // this is a comment\n"
                  (bytes-immediate [value #"ea\0"])))
+
+(define label-declaration
+  (>>0 label-identifier
+       space*
+       (literal ":")))
 
 (require "../instruction/control.rkt")
 

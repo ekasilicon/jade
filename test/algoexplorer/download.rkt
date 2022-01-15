@@ -6,7 +6,8 @@
 
 (define idxs
   (hash "mainnet" "https://algoexplorerapi.io/idx2/v2/applications"
-        "testnet" "https://testnet.algoexplorerapi.io/idx2/v2/applications"))
+        "testnet" "https://testnet.algoexplorerapi.io/idx2/v2/applications"
+        "betanet" "https://betanet.algoexplorerapi.io/idx2/v2/applications"))
 
 (define (applications #:limit limit #:token token)
   (get-pure-port (string->url (string-append (current-explorer-base)
@@ -21,7 +22,8 @@
 
 (define nets
   (hash "mainnet" "https://algoexplorerapi.io/v2/applications/"
-        "testnet" "https://testnet.algoexplorerapi.io/v2/applications/"))
+        "testnet" "https://testnet.algoexplorerapi.io/v2/applications/"
+        "betanet" "https://betanet.algoexplorerapi.io/v2/applications/"))
 
 (define (application #:app-id app-id)
   (get-pure-port (string->url (string-append (current-explorer-base) app-id))))
