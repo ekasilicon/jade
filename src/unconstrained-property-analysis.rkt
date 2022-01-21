@@ -96,11 +96,7 @@
             [`(== 0 ,c₀ ,c₁)
              (if (equal? c₀ c₁) (unit) (failure-cont))]
             [c
-             (foldr (λ (abs m)
-                      (>> ((abs 'assume) c self)
-                          m))
-                    (unit)
-                    abss)])]
+             (foldr (λ (abs m) (>> (((abs 'assume) c) self) m)) (unit) abss)])]
          [refute
           (match-lambda
             [`(! 0 ,c) (assume c)]
@@ -123,11 +119,7 @@
             [`(== 0 ,c₀ ,c₁)
              (if (equal? c₀ c₁) mzero (failure-cont))]
             [c
-             (foldr (λ (abs m)
-                      (>> ((abs 'refute) c self)
-                          m))
-                    (unit)
-                    abss)])])))
+             (foldr (λ (abs m) (>> (((abs 'refute) c) self) m)) (unit) abss)])])))
 
 (define logical-connective%
   (inc (unit)
@@ -166,9 +158,7 @@
    concrete-cblock%
    (make-abstraction%
     txn:application-id%
-    #;
     txn:rekey-to%
-    #;
     txn:on-completion%)
    standard-in-mode%
    logical-connective%

@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/match
-         #;racket/set
+         racket/set
          "static/object.rkt"
          (prefix-in i: "instruction/opcode.rkt")
          )
@@ -15,99 +15,155 @@
                         #f])])
     (present? c)))
 
+(define (must-be-=? X Y)
+  (or (equal? X Y)))
+
+(define (must-be-≠? X Y)
+  (or (and (bytes? X)
+           (bytes? Y)
+           (not (bytes=? X Y)))
+      (and (exact-nonnegative-integer? X)
+           (exact-nonnegative-integer? Y)
+           (not (= X Y)))))
+
+(define present%
+  (inc (key
+        assume/present refute/present)
+       [assume
+        (λ (c)
+          (if (present? key c)
+            (assume/present c)
+            (dot (unit) (unit))))]
+       [refute
+        (λ (c)
+          (if (present? key c)
+            (refute/present c)
+            (dot (unit) (unit))))]))
 
 (define application-id%
-  (inc ()
-       [initialize-context
-        (dot (transaction-property-put)
-             (transaction-property-put 'application-id #f))]
-       [assume
-        (λ (c o)
-          ((if (present? (i:ApplicationID) c)
-             (dot (unit) (unit))
-             (dot (unit) (unit)))
-           o))]
-       [refute
-        (λ (c o)
-          ((if (present? (i:ApplicationID) c)
-             (dot (unit) (unit))
-             (dot (unit) (unit)))
-           o))]))
+  (mix (inc ()
+            [key
+             (i:ApplicationID)]
+            [initialize-context
+             (dot (transaction-property-put)
+                  (transaction-property-put 'application-id #f))]
+            [assume/present
+             (match-lambda
+               [`(== 0 ,(i:ApplicationID) 0)
+                (dot (unit >>= mzero
+                       transaction-property-get transaction-property-put)
+                     (>>= (transaction-property-get 'application-id)
+                          (match-lambda
+                            [#f
+                             (transaction-property-put 'application-id `(= 0))]
+                            [`(≠ 0)
+                             mzero]
+                            [`(= 0)
+                             (unit)])))]
+               [`(== 0 0 ,(i:ApplicationID))
+                (assume/present `(== 0 ,(i:ApplicationID) 0))])]
+            [refute/present
+             (match-lambda
+               [`(== 0 ,(i:ApplicationID) 0)
+                (dot (unit >>= mzero
+                       transaction-property-get transaction-property-put)
+                     (>>= (transaction-property-get 'application-id)
+                          (match-lambda
+                            [#f
+                             (transaction-property-put 'application-id `(≠ 0))]
+                            [`(= 0)
+                             mzero]
+                            [`(≠ 0)
+                             (unit)])))]
+               [`(== 0 0 ,(i:ApplicationID))
+                (refute/present `(== 0 ,(i:ApplicationID) 0))])])
+       present%))
 
 (provide application-id%)
 
+(define rekey-to%
+  (mix (inc ()
+            [key
+             (i:RekeyTo)]
+            [initialize-context
+             (dot (transaction-property-put)
+                  (transaction-property-put 'rekey-to #f))]
+            [assume/present
+             (match-lambda
+               [`(== 0 ,(i:RekeyTo) ,X)
+                (dot (unit >>= mzero
+                       transaction-property-get transaction-property-put)
+                     (>>= (transaction-property-get 'rekey-to)
+                          (match-lambda
+                            [#f
+                             (transaction-property-put 'rekey-to X)]
+                            [Y
+                             (if (must-be-≠? X Y)
+                               mzero
+                               (unit))])))]
+               [`(== 0 ,X ,(i:RekeyTo))
+                (assume/present `(== 0 ,(i:RekeyTo) ,X))])]
+            [refute/present
+             (match-lambda
+               [`(== 0 ,(i:RekeyTo) ,X)
+                (dot (unit >>= mzero
+                       transaction-property-get transaction-property-put)
+                     (>>= (transaction-property-get 'rekey-to)
+                          (match-lambda
+                            [#f
+                             (transaction-property-put 'rekey-to X)]
+                            [Y
+                             (if (must-be-=? X Y)
+                               mzero
+                               (unit))])))]
+               [`(== 0 ,X ,(i:RekeyTo))
+                (refute/present `(== 0 ,(i:RekeyTo) ,X))])])
+       present%))
+
+(provide rekey-to%)
+
+(define on-completion%
+  (mix (inc (unit >>= >>
+              mzero
+              transaction-property-get transaction-property-put)
+            [key
+             (i:OnCompletion)]
+            [initialize-context
+             (dot (transaction-property-put)
+                  (transaction-property-put 'on-completion (seteqv 0 1 2 4 5)))]
+            [assume/present
+             (match-lambda
+               [`(== 0 ,(i:OnCompletion) ,(? exact-nonnegative-integer? X))
+                (dot (unit >>= mzero
+                       transaction-property-get transaction-property-put)
+                     (>>= (transaction-property-get 'on-completion)
+                          (λ (ocs)
+                            (let ([ocs (set-intersect ocs (seteqv X))])
+                              (if (set-empty? ocs)
+                                mzero
+                                (transaction-property-put 'on-completion ocs))))))]
+               [`(== 0 ,(? exact-nonnegative-integer? X) ,(i:OnCompletion))
+                (assume/present `(== 0 ,(i:OnCompletion) ,X))])]
+            [refute/present
+             (match-lambda
+               [`(== 0 ,(i:OnCompletion) ,(? exact-nonnegative-integer? X))
+                (dot (unit >>= mzero
+                       transaction-property-get transaction-property-put)
+                     (>>= (transaction-property-get 'on-completion)
+                          (λ (ocs)
+                            (let ([ocs (set-intersect ocs (set-subtract (seteqv 0 1 2 4 5) (seteqv X)))])
+                              (if (set-empty? ocs)
+                                mzero
+                                (transaction-property-put 'on-completion ocs))))))]
+               [`(== 0 ,(? exact-nonnegative-integer? X) ,(i:OnCompletion))
+                (refute/present `(== 0 ,(i:OnCompletion) ,X))])])
+       present%))
+
+
+(provide on-completion%)
+
 #|
 
-(define transaction-property
-  (inc (unit >>= >>)
-       [transaction-property-get
-        (λ (key)
-           (λ (ς ctx)
-             (match-let ([(list txn glbl glbl-state) ctx])
-               (list (underway [values (list (hash-ref txn key))] ς ctx)))))]
-       [transaction-property-put
-        (λ (key val)
-          (λ (ς ctx)
-            (match-let ([(list txn glbl glbl-state) ctx])
-              (list (underway [values (list)] ς [ctx (list (hash-set txn key val)
-                                                           glbl
-                                                           glbl-state)])))))]))
-
-(define txn:application-id%
-  (inc (unit >>= >>
-        mzero
-        transaction-property-get transaction-property-put)
-       [⊓
-        (λ (key X)
-          (if (eq? key 'application-id)
-            (>>= (transaction-property-get 'application-id)
-                 (match-lambda
-                   [#f
-                    (transaction-property-put 'application-id X)
-                    #;
-                    (match X
-                      [`(≠ 0)
-                       `(≠ 0)]
-                      [`(= 0)]
-                      [])
-                    #;
-                    (transaction-property-put 'application-id X)]
-                   [`(≠ 0)
-                    (match X
-                      [`(≠ 0)
-                       (unit)]
-                      [`(= 0)
-                       mzero])]
-                   [`(= 0)
-                    (match X
-                      [`(= 0)
-                       (unit)]
-                      [`(≠ 0)
-                       mzero])]))
-            ((super ⊓) key X)))]
-       [initialize-context
-        (>> (transaction-property-put 'application-id #f)
-            (super initialize-context))]
-       [assume
-        (λ (c)
-          (>> (if (present? (i:ApplicationID) c)
-                (match c
-                  [`(== 0 ,(i:ApplicationID) 0)
-                   (⊓ 'application-id `(= 0))]
-                  [`(== 0 0 ,(i:ApplicationID))
-                   (⊓ 'application-id `(= 0))])
-                (unit))
-              ((super assume) c)))]
-       [refute
-        (λ (c)
-          (>> (if (present? (i:ApplicationID) c)
-                (match c
-                  [`(== 0 ,(i:ApplicationID) 0)
-                   (⊓ 'application-id `(≠ 0))]
-                  [`(== 0 0 ,(i:ApplicationID))
-                   (⊓ 'application-id `(≠ 0))])
-                (unit))
-              ((super refute) c)))]))
 
 (define txn:rekey-to%
   (inc (unit >>= >>
@@ -166,45 +222,6 @@
                 (unit))
               ((super refute) c)))]))
 
-(define txn:on-completion%
-  (inc (unit >>= >>
-        mzero
-        transaction-property-get transaction-property-put)
-       [⊓
-        (λ (key X)
-          (if (eq? key 'on-completion)
-            (>>= (transaction-property-get 'on-completion) 
-                 (λ (oc)
-                   (let ([oc (set-intersect oc X)])
-                     (if (set-empty? oc)
-                       mzero
-                       (transaction-property-put 'on-completion oc)))))
-            ((super ⊓) key X)))]
-       [initialize-context
-        (>> (transaction-property-put 'on-completion (seteqv 0 1 2 4 5))
-            (super initialize-context))]
-       [assume
-        (λ (c)
-          (>> (if (present? (i:OnCompletion) c)
-                (letrec ([loop (match-lambda
-                                 [`(== 0 ,(? exact-nonnegative-integer? x) ,(i:OnCompletion))
-                                  (loop `(== 0 ,(i:OnCompletion) ,x))]
-                                 [`(== 0 ,(i:OnCompletion) ,(? exact-nonnegative-integer? x))
-                                  (⊓ 'on-completion (seteqv x))])])
-                  (loop c))
-                (unit))
-              ((super assume) c)))]
-       [refute
-        (λ (c)
-          (>> (if (present? (i:OnCompletion) c)
-                (letrec ([loop (match-lambda
-                                 [`(== 0 ,(? exact-nonnegative-integer? x) ,(i:OnCompletion))
-                                  (loop `(== 0 ,(i:OnCompletion) ,x))]
-                                 [`(== 0 ,(i:OnCompletion) ,(? exact-nonnegative-integer? x))
-                                  (⊓ 'on-completion (set-subtract (seteqv 0 1 2 4 5) (seteqv x)))])])
-                  (loop c))
-                (unit))
-              ((super refute) c)))]))
 
 
 (define (present? f t)
