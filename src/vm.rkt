@@ -225,7 +225,7 @@
        [execute
         (sumtype-case-lambda i:Instruction2
           [(i:Instruction1 instr)
-           ((super execute) instr)]          
+           ((super 'execute) instr)]          
           [(i:addw)
            (primitive-apply addw 2)]
           [(i:txna [field f] [array-index ai])
@@ -310,7 +310,7 @@
        [execute
         (sumtype-case-lambda i:Instruction3
           [(i:Instruction2 instr)
-           ((super execute) instr)]          
+           ((super 'execute) instr)]          
           [(i:gtxns [field f])
            (>>= (>>= (pop) (λ (gi) (group-transaction gi f))) push)]
           [(i:gtxnsa [field f] [array-index ai])
@@ -389,16 +389,16 @@
           [(i:bytes-immediate value)
            (push value)]
           [instr
-           ((super execute) instr)])]
+           ((super 'execute) instr)])]
        [pop
         (λ ([n 1])
           (let loop ([n n]
                      [xs (list)])
             (if (zero? n)
               (apply unit xs)
-              (>>= (super pop) (λ (x) (loop (sub1 n) (cons x xs)))))))]
+              (>>= (super 'pop) (λ (x) (loop (sub1 n) (cons x xs)))))))]
        [push
-        (λ xs (foldr (λ (x m) (>> ((super push) x) m)) (unit) xs))]
+        (λ xs (foldr (λ (x m) (>> ((super 'push) x) m)) (unit) xs))]
        [swap
         (>>= (pop 2) (λ (a b) (push b a)))]
        [primitive-apply

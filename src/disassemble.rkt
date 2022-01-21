@@ -58,7 +58,7 @@
                (λ (v)
                  (λ (bs i σ)
                    (success [xs (list)] i [σ (hash-set σ k v)]))))]
-            [mupdate
+            [mupd
              (λ (k f d)
                (λ (bs i σ)
                  (success [xs (list)] i [σ (hash-update σ k f d)])))]
@@ -79,12 +79,12 @@
              (>>= position
                   (λ (lft)
                     (mplus (>> stream-end
-                               (mupdate 'instructions (λ (h) (hash-set h lft (list))) (hasheqv)))
+                               (mupd 'instructions (λ (h) (hash-set h lft (list))) (hasheqv)))
                            (>> (mplus (>>= disassemble-instruction
                                            (λ (instr)
                                              (>>= position
                                                   (λ (rgt)
-                                                    (mupdate 'instructions (λ (h) (hash-set h lft (cons instr rgt))) (hasheqv))))))
+                                                    (mupd 'instructions (λ (h) (hash-set h lft (cons instr rgt))) (hasheqv))))))
                                       (fail/context (λ (fail bs i) (fail "unrecognized instruction at byte offset ~a: ~a" i (number->string (bytes-ref bs i) 16)))))
                                disassemble-instruction-stream-inner))))]
             [disassemble-instruction-stream

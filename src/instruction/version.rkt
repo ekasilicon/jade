@@ -17,38 +17,38 @@
         [instruction-version
          (sumtype-case-lambda Instruction2
            [(Instruction1 instr) 
-            ((super instruction-version) instr)]
+            ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 2))])
    (inc ()
         [instruction-version
          (sumtype-case-lambda Instruction3
            [(Instruction2 instr) 
-            ((super instruction-version) instr)]
+            ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 3))])
    (inc ()
         [instruction-version
          (sumtype-case-lambda Instruction4
            [(Instruction3 instr) 
-            ((super instruction-version) instr)]
+            ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 4))])
    (inc ()
         [instruction-version
          (sumtype-case-lambda Instruction5
            [(Instruction4 instr) 
-            ((super instruction-version) instr)]
+            ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 5))])
    (inc ()
         [instruction-version
          (sumtype-case-lambda Instruction6
            [(Instruction5 instr) 
-            ((super instruction-version) instr)]
+            ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 6))])
    (inc ()
         [instruction-version
          (match-lambda
            [(varuint-immediate) #f]
            [(bytes-immediate) #f]
-           [instr ((super instruction-version) instr)])])))
+           [instr ((super 'instruction-version) instr)])])))
 
 (provide instruction-version/version)
 

@@ -47,7 +47,7 @@
                                                          (list #'name)))]
                                               [(sumtype-info variant-ids _)
                                                (let-values ([(_ names) (loop variant-ids)])
-                                                 (values #`(super #,method-name)
+                                                 (values #`(super '#,method-name)
                                                          names))])]
                                         [else
                                          (raise-syntax-error #f "not reachable" variant-id)])]
@@ -96,7 +96,7 @@
          [(syntax-local-value variant-id (λ () #f))
           => (match-lambda
                [(sumtype-info _ _)
-                #'(super instruction)]
+                #'(super 'instruction)]
                [(record-info _ fields _ cons _ _)
                 (with-syntax ([name (symbol->string (syntax->datum variant-id))]
                               [constructor cons]

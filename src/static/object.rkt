@@ -5,6 +5,7 @@
          racket/promise
          racket/stxparam)
 
+(define-syntax-parameter self (syntax-rules ()))
 (define-syntax-parameter super (syntax-rules ()))
 
 (define-syntax field
@@ -21,17 +22,16 @@
                                    (set! cached #'(force x))
                                    cached))]))]
                      ...)
-          (syntax-parameterize ([super (let ([cached (hasheq)])
-                                         (syntax-parser
-                                           [(_ x:id)
-                                            (let ([x-symbol (syntax->datum #'x)])
-                                              (or (hash-ref cached x-symbol #f)
-                                                  (with-syntax ([y (syntax-local-lift-expression #'(delay (mysuper 'x)))])
-                                                    (set! cached (hash-set cached x-symbol #'(force y)))
-                                                    (hash-ref cached x-symbol))))]))])
+          (syntax-parameterize ([self (make-rename-transformer #'myself)]
+                                [super (make-rename-transformer #'mysuper)])
             e))
       'expression
       (list))]))
+
+(define-syntax dot
+  (syntax-parser
+    [(_ (d:id ...) e)
+     #'(λ (myself) (field myself myself (d ...) e))]))
 
 (define-syntax inc
   (syntax-parser
@@ -52,11 +52,19 @@
 (define (mix . ps)
   (foldr (λ (p p₀) (λ (self super) (p self (p₀ self super)))) (λ (self super) super) ps))
 
+(provide self super dot inc mix fix)
 
-
-(provide super inc mix fix)
-
-
+(module+ main
+  (let ([o (fix (inc () [hello 10]))])
+    ((dot (hello) hello) o))
+  
+  (let loop ([i 100]
+             [o (fix (inc ()
+                          [hello self]))])
+    (if (zero? i)
+      o
+      (loop (sub1 i)
+            (o 'hello)))))
 
 #|
 

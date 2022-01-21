@@ -129,7 +129,7 @@
            [#x40 (>>= read-offset (λ (offset) (unit (bnz offset))))]
            [#x48 (unit (pop))]
            [#x49 (unit (dup))]
-           [oc   ((super decode-instruction) oc)])]
+           [oc   ((super 'decode-instruction) oc)])]
         [decode-transaction-field
          (match-lambda
            [0  (unit (Sender))]
@@ -156,7 +156,7 @@
            [21 (unit (AssetCloseTo))]
            [22 (unit (GroupIndex))]
            [23 (unit (TxID))]
-           [bc ((super decode-transaction-field) bc)])]
+           [bc ((super 'decode-transaction-field) bc)])]
         [decode-global-field
          (match-lambda
            [0  (unit (MinTxnFee))]
@@ -164,7 +164,7 @@
            [2  (unit (MaxTxnLife))]
            [3  (unit (ZeroAddress))]
            [4  (unit (GroupSize))]
-           [bc ((super decode-global-field) bc)])])
+           [bc ((super 'decode-global-field) bc)])])
    (inc (read-transaction-field read-global-field read-asset-holding-field read-asset-params-field
         read-uint8 read-offset read-bytes read-varuint
         unit >>=)
@@ -195,7 +195,7 @@
            [#x69 (unit (app_global_del))]
            [#x70 (>>= read-asset-holding-field (λ (field) (unit (asset_holding_get field))))]
            [#x71 (>>= read-asset-params-field (λ (field) (unit (asset_params_get field))))]
-           [oc   ((super decode-instruction) oc)])]
+           [oc   ((super 'decode-instruction) oc)])]
         [decode-transaction-field
          (match-lambda
            [24 (unit (ApplicationID))]
@@ -222,14 +222,14 @@
            [45 (unit (FreezeAsset))]
            [46 (unit (FreezeAssetAccount))]
            [47 (unit (FreezeAssetFrozen))]
-           [bc ((super decode-transaction-field) bc)])]
+           [bc ((super 'decode-transaction-field) bc)])]
         [decode-global-field
          (match-lambda
            [5  (unit (LogicSigVersion))]
            [6  (unit (Round))]
            [7  (unit (LatestTimestamp))]
            [8  (unit (CurrentApplicationID))]
-           [bc ((super decode-global-field) bc)])]
+           [bc ((super 'decode-global-field) bc)])]
         [decode-asset-holding-field
          (match-lambda
            [0 (unit (AssetBalance))]
@@ -272,7 +272,7 @@
            [#x78 (unit (min_balance))]
            [#x80 (>>= read-bytes (λ (bytes) (unit (pushbytes bytes))))]
            [#x81 (>>= read-varuint (λ (uint) (unit (pushint uint))))]
-           [oc   ((super decode-instruction) oc)])]
+           [oc   ((super 'decode-instruction) oc)])]
         [decode-transaction-field
          (match-lambda
            [48 (unit (Assets))]
@@ -283,11 +283,11 @@
            [53 (unit (GlobalNumByteSlice))]
            [54 (unit (LocalNumUint))]
            [55 (unit (LocalNumByteSlice))]
-           [bc ((super decode-transaction-field) bc)])]
+           [bc ((super 'decode-transaction-field) bc)])]
         [decode-global-field
          (match-lambda
            [9  (unit (CreatorAddress))]
-           [bc ((super decode-global-field) bc)])])
+           [bc ((super 'decode-global-field) bc)])])
    (inc (read-uint8 read-offset
          unit >>=)
         [decode-instruction
@@ -321,11 +321,11 @@
            [#xad (unit (b^))]
            [#xae (unit (b~))]
            [#xaf (unit (bzero))]
-           [oc   ((super decode-instruction) oc)])]
+           [oc   ((super 'decode-instruction) oc)])]
         [decode-transaction-field
          (match-lambda
            [56 (unit (ExtraProgramPages))]
-           [bc ((super decode-transaction-field) bc)])])
+           [bc ((super 'decode-transaction-field) bc)])])
    (inc (read-transaction-field read-app-params-field
          read-uint8
          unit >>=)
@@ -354,7 +354,7 @@
            [#xc1 (>>= read-uint8 (λ (group-index) (>>= read-transaction-field (λ (field) (unit (gtxnas group-index field))))))]
            [#xc2 (>>= read-transaction-field (λ (field) (unit (gtxnsas field))))]
            [#xc3 (unit (args))]
-           [oc   ((super decode-instruction) oc)])]
+           [oc   ((super 'decode-instruction) oc)])]
         [decode-transaction-field
          (match-lambda
            [57 (unit (Nonparticipation))]
@@ -362,19 +362,19 @@
            [59 (unit (NumLogs))]
            [60 (unit (CreatedAssetID))]
            [61 (unit (CreatedApplicationID))]
-           [bc ((super decode-transaction-field) bc)])]
+           [bc ((super 'decode-transaction-field) bc)])]
         [decode-global-field
          (match-lambda
            [10 (unit (CurrentApplicationAddress))]
            [11 (unit (GroupID))]
-           [bc ((super decode-global-field) bc)])]
+           [bc ((super 'decode-global-field) bc)])]
         [decode-app-params-field
          (match-lambda)])
    (inc (unit)
         [decode-instruction
          (match-lambda
            [#xb6 (unit (itxn_next))]
-           [oc   ((super decode-instruction) oc)])])
+           [oc   ((super 'decode-instruction) oc)])])
    read-byte-extras))
 
 (provide instruction-read/version)
