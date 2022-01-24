@@ -4,35 +4,44 @@
          net/uri-codec
          racket/port)
 
-(define idxs
-  (hash "mainnet" "https://algoexplorerapi.io/idx2/v2/applications"
-        "testnet" "https://testnet.algoexplorerapi.io/idx2/v2/applications"
-        "betanet" "https://betanet.algoexplorerapi.io/idx2/v2/applications"))
+(define nets
+  (hash "mainnet" "https://algoindexer.algoexplorerapi.io/v2/applications"
+        "testnet" "https://algoindexer.testnet.algoexplorerapi.io/v2/applications"
+        "betanet" "https://algoindexer.betanet.algoexplorerapi.io/v2/applications"))
 
-(define (applications #:limit limit #:token token)
+(define (applications #:limit limit #:next next)
   (get-pure-port (string->url (string-append (current-explorer-base)
                                              "?"
                                              (alist->form-urlencoded
                                               (append (if limit
                                                         (list (cons 'limit limit))
                                                         (list))
-                                                      (if token
-                                                        (list (cons 'token token))
+                                                      (if next
+                                                        (list (cons 'next next))
                                                         (list))))))))
 
-(define nets
-  (hash "mainnet" "https://algoexplorerapi.io/v2/applications/"
-        "testnet" "https://testnet.algoexplorerapi.io/v2/applications/"
-        "betanet" "https://betanet.algoexplorerapi.io/v2/applications/"))
-
 (define (application #:app-id app-id)
-  (get-pure-port (string->url (string-append (current-explorer-base) app-id))))
+  (get-pure-port (string->url (string-append (current-explorer-base) "/" app-id))))
 
 (define current-net-id (make-parameter #f))
 (define current-explorer-base (make-parameter #f))
 
-
 (module+ main
+  #;
+  (require racket/cmdline)
+  #;
+  (command-line
+   #:program
+   "algoexplorer-download"
+   #:once-each
+   [("-l" "--limit")
+    limit
+    "Number of programs to fetch per request"]
+   [("–n" "--number")
+    number
+    "Number of requests to make"]
+   )
+
   (require racket/pretty
            json)
 
@@ -53,21 +62,28 @@
   (match (current-command-line-arguments)
     [(vector net-id "index")
      (cond
-       [(hash-ref idxs net-id #f)
+       [(hash-ref nets net-id #f)
         => (λ (explorer-base)
+             (define (save!* applications)
+               (printf "Saving ~a applications...\n" (length applications))
+               (for-each
+                (λ (application)
+                  (save! (number->string (hash-ref application 'id)) (λ () application)))
+                applications))
              (parameterize ([current-net-id net-id]
                             [current-explorer-base explorer-base])
-               (match (read-json (applications #:limit #f #;"100" #:token #f
-                                               ))
-                 [(hash-table ('applications applications))
-                  (for-each
-                   (λ (application)
-                     (save! (number->string (hash-ref application 'id))
-                            (λ () application)))
-                   applications)])))]
+               (let loop ([next #f])
+                 (match (read-json (applications #:limit "200" #:next next))
+                   [(hash-table ('applications applications)
+                                ('next-token next))
+                    (save!* applications)
+                    (loop next)]
+                   [(hash-table ('applications 'null))
+                    (void)]))
+               (displayln "done indexing")))]
        [else
         (displayln "expected <net-id> as first argument; one of...")
-        (for-each (λ (net-id) (printf "  ~a\n" net-id)) (hash-keys idxs))])]
+        (for-each (λ (net-id) (printf "  ~a\n" net-id)) (hash-keys nets))])]
     [(vector net-id app-ids ...)
      (cond
        [(hash-ref nets net-id #f)

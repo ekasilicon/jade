@@ -49,34 +49,44 @@
                   (transaction-property-put 'application-id #f))]
             [assume/present
              (match-lambda
-               [`(== 0 ,(i:ApplicationID) 0)
+               [`(== 0 ,(i:ApplicationID) ,(? exact-nonnegative-integer? X))
                 (dot (unit >>= mzero
                        transaction-property-get transaction-property-put)
                      (>>= (transaction-property-get 'application-id)
                           (match-lambda
                             [#f
-                             (transaction-property-put 'application-id `(= 0))]
-                            [`(≠ 0)
-                             mzero]
-                            [`(= 0)
-                             (unit)])))]
-               [`(== 0 0 ,(i:ApplicationID))
-                (assume/present `(== 0 ,(i:ApplicationID) 0))])]
+                             (transaction-property-put 'application-id `(= ,X))]
+                            [`(= ,Y)
+                             (if (must-be-≠? X Y)
+                               mzero
+                               (unit))]
+                            [`(≠ ,Y)
+                             (if (must-be-=? X Y)
+                               mzero
+                               (unit))])))]               
+               [`(== 0 ,(? exact-nonnegative-integer? X) ,(i:ApplicationID))
+                (assume/present `(== 0 ,(i:ApplicationID) ,X))]
+               [c
+                (dot (log) (log "unknown ApplicationID constraint ~a" c))])]
             [refute/present
              (match-lambda
-               [`(== 0 ,(i:ApplicationID) 0)
+               [`(== 0 ,(i:ApplicationID) ,(? exact-nonnegative-integer? X))
                 (dot (unit >>= mzero
                        transaction-property-get transaction-property-put)
                      (>>= (transaction-property-get 'application-id)
                           (match-lambda
                             [#f
-                             (transaction-property-put 'application-id `(≠ 0))]
-                            [`(= 0)
-                             mzero]
-                            [`(≠ 0)
+                             (transaction-property-put 'application-id `(≠ ,X))]
+                            [`(= ,Y)
+                             (if (must-be-=? X Y)
+                               mzero
+                               (unit))]
+                            [`(≠ ,Y)
                              (unit)])))]
-               [`(== 0 0 ,(i:ApplicationID))
-                (refute/present `(== 0 ,(i:ApplicationID) 0))])])
+               [`(== 0 ,(? exact-nonnegative-integer? X) ,(i:ApplicationID))
+                (refute/present `(== 0 ,(i:ApplicationID) ,X))]
+               [c
+                (dot (log) (log "unknown ApplicationID constraint ~a" c))])])
        present%))
 
 (provide application-id%)
@@ -102,7 +112,9 @@
                                mzero
                                (unit))])))]
                [`(== 0 ,X ,(i:RekeyTo))
-                (assume/present `(== 0 ,(i:RekeyTo) ,X))])]
+                (assume/present `(== 0 ,(i:RekeyTo) ,X))]
+               [c
+                (dot (log) (log "unknown RekeyTo constraint ~a" c))])]
             [refute/present
              (match-lambda
                [`(== 0 ,(i:RekeyTo) ,X)
@@ -117,7 +129,9 @@
                                mzero
                                (unit))])))]
                [`(== 0 ,X ,(i:RekeyTo))
-                (refute/present `(== 0 ,(i:RekeyTo) ,X))])])
+                (refute/present `(== 0 ,(i:RekeyTo) ,X))]
+               [c
+                (dot (log) (log "unknown RekeyTo constraint ~a" c))])])
        present%))
 
 (provide rekey-to%)
@@ -143,7 +157,9 @@
                                 mzero
                                 (transaction-property-put 'on-completion ocs))))))]
                [`(== 0 ,(? exact-nonnegative-integer? X) ,(i:OnCompletion))
-                (assume/present `(== 0 ,(i:OnCompletion) ,X))])]
+                (assume/present `(== 0 ,(i:OnCompletion) ,X))]
+               [c
+                (dot (log) (log "unknown OnCompletion constraint ~a" c))])]
             [refute/present
              (match-lambda
                [`(== 0 ,(i:OnCompletion) ,(? exact-nonnegative-integer? X))
@@ -156,7 +172,9 @@
                                 mzero
                                 (transaction-property-put 'on-completion ocs))))))]
                [`(== 0 ,(? exact-nonnegative-integer? X) ,(i:OnCompletion))
-                (refute/present `(== 0 ,(i:OnCompletion) ,X))])])
+                (refute/present `(== 0 ,(i:OnCompletion) ,X))]
+               [c
+                (dot (log) (log "unknown OnCompletion constraint ~a" c))])])
        present%))
 
 

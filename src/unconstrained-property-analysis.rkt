@@ -5,11 +5,15 @@
          "static/object.rkt"
          "static/record.rkt"
          "static/sumtype.rkt"
+         "error.rkt"
          "monad.rkt"
+         "assembly.rkt"
          "disassemble.rkt"
-         "parse.rkt"
+         ;"parse.rkt"
+         "assembly/control.rkt"
          "vm.rkt"
          "instruction/version.rkt"
+         "instruction/control.rkt"
          (prefix-in txn: "abstraction.rkt"))
 
 (define-sumtype Result
@@ -146,12 +150,46 @@
             (unit `(\|\| 0 ,x ,y))))]))
 
 (define (make-vm lsv)
+  #;
+  (define-values (offset-map has-inorder-successor?)
+         (let ([o (fix (mix (inc ()
+                                 [offset-map
+                                  (λ (f instr)
+                                    (sumtype-case Pseudoinstruction instr
+                                      [(varuint-immediate value)
+                                       (varuint-immediate value)]
+                                      [(bytes-immediate value)
+                                       (bytes-immediate value)]
+                                      [(instruction [instruction instr])
+                                       (instruction [instruction ((super 'offset-map) f instr)])]))]
+                                 [has-inorder-successor?
+                                  (sumtype-case-lambda Pseudoinstruction
+                                    [(varuint-immediate)
+                                     #t]
+                                    [(bytes-immediate)
+                                     #t]
+                                    [(instruction [instruction instr])
+                                     (instruction [instruction ((super 'has-inorder-successor?) instr)])])])
+                            (instruction-control/version lsv)))])
+           (values (o 'offset-map)
+                   (o 'has-inorder-successor?))))
   (mix
    #;
    (inc (>> trace)
         [step
-         (>> (trace (λ (ς _) (pretty-print ς)))
-             (super step))])
+         (>> (trace (λ (ς _) (pretty-print
+                              (hash-update ς 'pc (letrec ([go (match-lambda
+                                                                [(list* instr₀ instr₁ _)
+                                                                 (list* (offset-map go instr₀)
+                                                                        (offset-map go instr₁)
+                                                                        (list))]
+                                                                [(list* instr₀ _)
+                                                                 (list* (offset-map go instr₀)
+                                                                        (list))]
+                                                                [(list)
+                                                                 (list)])])
+                                                   go)))))
+             (super 'step))])
    
    (vm/version lsv)
    concrete-stack%
@@ -198,13 +236,28 @@
         [group-transaction-array (p unit group-transaction-array 1)]
         [global unit]
         [btoi (p unit btoi 1)]
-        [itob (p unit itob 1)]
-        [concat (p unit concat 1)]
+        [itob
+         (λ (x)
+           (if (exact-nonnegative-integer? x)
+             (unit (string->bytes/utf-8 (number->string x)))
+             (unit `(itob 0 ,x))))]
+        [concat
+         (λ (x y)
+           (if (and (bytes? x)
+                    (bytes? y))
+             (let ([r (bytes-append x y)])
+               (if (> (bytes-length r) 4096)
+                 (panic "byte string ~v exceeds 4096 bytes")
+                 (unit r)))
+             (unit `(concat 0 ,x ,y))))]
         [substring (p unit substring 1)]
         [len (p unit len 1)]
+        [getbyte (p unit getbyte 1)]
+        [setbyte (p unit setbyte 1)]
         [balance (p unit balance 1)]
         [min-balance (p unit min-balance 1)]
         [sha256 (p unit sha256 1)]
+        [keccak256 (p unit keccak256 1)]
         [sha512-256 (p unit sha512-256 1)]
         [u== (p unit == 1)]
         [u<  (p unit < 1)]
@@ -214,6 +267,12 @@
         [u/ (p unit / 1)]
         [u& (p unit & 1)]
         [u% (p unit % 1)]
+        [u& (p unit & 1)]
+        [u\| (p unit \| 1)]
+        [u^ (p unit ^ 1)]
+        [u~ (p unit ~ 1)]
+        [addw (p unit addw 2)]
+        [mulw (p unit mulw 2)]
         [app-opted-in (p unit app-opted-in 1)]
         [app-local-get
          (λ (acct key)
@@ -310,6 +369,11 @@
    (inc (get)
         [logic-sig-version
          (get 'logic-sig-version)])
+   (inc (upd)
+        [log
+         (λ (template . args)
+           (let ([msg (apply format template args)])
+             (upd 'log (λ (msgs) (set-add msgs msg)) (set))))])
    monad+-extras
    (inc ()
         [mplus
@@ -374,24 +438,39 @@
   (let ([→ (vm 'step)])
     (match ((vm 'initialize-context) ς ctx)
       [(list (underway [values (list)] ς ctx))
-       (letrec ([loop (λ (seen finals ς ctx)
-                        (if (set-member? seen ς)
-                          (values seen finals)
-                          (for/fold ([seen (set-add seen ς)]
-                                     [finals finals])
-                                    ([r (in-list (→ ς ctx))])
-                            (match r
-                              [(underway [values (list)] ς ctx)
-                               (loop seen finals ς ctx)]
-                              [(failure! message)
-                               (values seen finals)]
-                              [(returned code ctx)
-                               (values seen
-                                       (match code
-                                         [1 (set-add finals ctx)]
-                                         [0 finals]))]))))])
-         (let-values ([(seen finals) (loop (set) (set) ς ctx)])
-           finals))])))
+       (define ch (make-channel))
+       (define th
+         (thread
+          (λ ()
+            (channel-put
+             ch
+             (let/ec return
+               (letrec ([loop (λ (seen finals ς ctx)
+                                (if (> (set-count seen) 10000)
+                                  (return (error 'timeout "exceeded 10000 states"))
+                                  (if (set-member? seen ς)
+                                    (values seen finals)
+                                    (for/fold ([seen (set-add seen ς)]
+                                               [finals finals])
+                                              ([r (in-list (→ ς ctx))])
+                                      (match r
+                                        [(underway [values (list)] ς ctx)
+                                         (loop seen finals ς ctx)]
+                                        [(failure! message)
+                                         (values seen finals)]
+                                        [(returned code ctx)
+                                         (values seen
+                                                 (match code
+                                                   [1 (set-add finals ctx)]
+                                                   [0 finals]))])))))])
+                 (let-values ([(seen finals) (loop (set) (set) ς ctx)])
+                   finals)))))))
+       (cond
+         [(sync/timeout 10 ch)
+          => values]
+         [else
+          (kill-thread th)
+          (error 'timeout "exceeded 10 seconds")])])))
 
 (record execution-context (approval-program
                            clear-state-program
@@ -410,10 +489,10 @@
                         local-num-byte-slice
                         local-num-uint
                         global-state)
-     (match (disassemble approval-program) 
+     (match (control-flow-graph (disassemble approval-program))
        [(cons lsv cfg)
         (if (<= lsv 3)
-          (let ([ctxs (analyze (fix (make-vm lsv))
+          (match (analyze (fix (make-vm lsv))
                                (hasheq 'logic-sig-version lsv
                                        'pc                cfg
                                        'stack             (list)
@@ -437,13 +516,16 @@
                                            (i:LocalNumByteSlice)  local-num-byte-slice)
                                      (hash (i:LogicSigVersion) (for/set ([i (in-range 1 lsv)]) i)
                                            (i:GroupSize)       (for/set ([i (in-range 16)]) (add1 i)))
-                                     global-state))])
-            (for/set ([ctx (in-set ctxs)])
-              (match-let ([(list txn glbl glbl-state) ctx])
-                txn))) 
-          (error 'unconstrained-property-analysis "does not support LogicSigVersion = ~a > 3" lsv))]
+                                     global-state))
+            [(error-result tag message)
+             (error-result tag message)]
+            [ctxs
+             (for/set ([ctx (in-set ctxs)])
+               (match-let ([(list txn glbl glbl-state) ctx])
+                 txn))]) 
+          (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))]
        [#f
-        (error 'unconstrained-property-analysis "unable to read initial logic signature version")])]))
+        (error 'bad-binary-prefix "unable to read initial logic signature version")])]))
 
 (define (analyze/raw-binary program-type bs constants)
   42)
@@ -452,68 +534,71 @@
          net/base64)
 
 (define (analyze/json-package bs constants)
-  (match (with-handlers ([exn:fail:read? (λ (e)
-                                           (displayln (exn-message e))
-                                           (exit 255))])
+  (match (with-handlers ([exn:fail:read? (λ (e) (error 'invalid-json (exn-message e)))])
            (read-json (open-input-bytes bs)))
+    [(error-result tag message)
+     (error-result tag message)]
     [(hash-table ('id id)
-                 ('params (hash-table ('approval-program    approval-program)
-                                      ('clear-state-program clear-state-program)
-                                      ('creator             creator)
-                                      ('global-state        global-entries)
-                                      ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
-                                                                        ('num-uint       global-num-uint)))
-                                      ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
-                                                                        ('num-uint       local-num-uint))))))
-     (run (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
-                             [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
-                             global-num-byte-slice
-                             global-num-uint
-                             local-num-byte-slice
-                             local-num-uint
-                             [global-state         (for/hash ([entry (in-list global-entries)])
-                                                     (match entry
-                                                       [(hash-table ('key key) ('value value))
-                                                        (values (base64-decode (string->bytes/utf-8 key))
-                                                                (match (hash-ref value 'type)
-                                                                  [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
-                                                                  [2 (hash-ref value 'uint)]))]))])
-          constants)]
+                 ('params (and params
+                               (hash-table ('approval-program    approval-program)
+                                           ('clear-state-program clear-state-program)
+                                           ('creator             creator)
+                                           ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
+                                                                             ('num-uint       global-num-uint)))
+                                           ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
+                                                                             ('num-uint       local-num-uint)))))))
+     (if (or (eq? approval-program 'null)
+             (eq? clear-state-program 'null))
+       (error 'program-missing "program was null in package")
+       (let ([global-state (match params
+                             [(hash-table ('global-state global-entries))
+                              (for/hash ([entry (in-list global-entries)])
+                                (match entry
+                                  [(hash-table ('key key) ('value value))
+                                   (values (base64-decode (string->bytes/utf-8 key))
+                                           (match (hash-ref value 'type)
+                                             [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
+                                             [2 (hash-ref value 'uint)]))]))]
+                             [_
+                              #f])])
+         (run (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
+                                 [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
+                                 global-num-byte-slice
+                                 global-num-uint
+                                 local-num-byte-slice
+                                 local-num-uint
+                                 global-state)
+              constants)))]
     [json
-     (displayln #<<MESSAGE
-Input JSON did not match expected format.
-(Was it produced by the Algorand API v2?)
-MESSAGE
-                )
-     #;
-     (exit 255)]))
+     (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by the Algorand API v2?)")]))
 
 (provide analyze/raw-binary
          analyze/json-package)
 
+#;
 (define (analyze/assembly asm)
-  (match (parse asm) 
+  (match (control-flow-graph (parse asm))
     [(cons lsv cfg)
-     (pretty-print cfg)
-        (if (<= lsv 3)
-          (let ([ctxs (time
-                       (analyze (fix (make-vm lsv))
-                                (hasheq 'logic-sig-version lsv
-                                        'pc                cfg
-                                        'stack             (list)
-                                        'scratch-space     (hasheqv)
-                                        'intcblock         (list)
-                                        'bytecblock        (list))
-                                (list (hasheq)
-                                      #f
-                                      #f)))])
-            (for/set ([ctx (in-set ctxs)])
-              (match-let ([(list txn glbl glbl-state) ctx])
-                txn))) 
-          (error 'unconstrained-property-analysis "does not support LogicSigVersion = ~a > 3" lsv))]
-       [#f
-        (error 'unconstrained-property-analysis "unable to parse assembly")]))
+     (if (<= lsv 3)
+       (let ([ctxs (time
+                    (analyze (fix (make-vm lsv))
+                             (hasheq 'logic-sig-version lsv
+                                     'pc                cfg
+                                     'stack             (list)
+                                     'scratch-space     (hasheqv)
+                                     'intcblock         (list)
+                                     'bytecblock        (list))
+                             (list (hasheq)
+                                   #f
+                                   #f)))])
+         (for/set ([ctx (in-set ctxs)])
+           (match-let ([(list txn glbl glbl-state) ctx])
+             txn))) 
+       (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))]
+    [#f
+     (error 'assembly-parse-failure "unable to parse assembly")]))
 
+#;
 (provide analyze/assembly)
 
 (module+ main
@@ -527,7 +612,10 @@ MESSAGE
      (for-each
       (λ (filename)
         (displayln filename)
-        (with-handlers (#;[exn:fail? (λ (e) (displayln (exn-message e)))]
-                        )
-          (pretty-print (analyze/json-package (call-with-input-file filename port->bytes) (hash)))))
+        (match (analyze/json-package (call-with-input-file filename port->bytes) (hash))
+          [(error-result tag message)
+           (displayln tag)
+           (displayln message)]
+          [results
+           (pretty-print results)]))
       filenames)]))

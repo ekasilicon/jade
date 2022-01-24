@@ -1,13 +1,16 @@
 #lang racket/base
-(require racket/match
+(require (only-in racket/match match match-lambda)
+         (only-in racket/set seteqv set-add set->list)
          "static/sumtype.rkt"
          "static/object.rkt"
+         "error.rkt"
          "monad.rkt"
          "read-byte.rkt"
          "prefix.rkt"
          "version.rkt"
          "instruction/read.rkt"
-         "instruction/control.rkt")
+         "instruction/control.rkt"
+         "assembly.rkt")
 
 (define-sumtype Result
   (failure message)
@@ -40,11 +43,6 @@
                (if (= (bytes-length bs) i)
                  #f
                  (success [xs (list (bytes-ref bs i))] [i (add1 i)] σ)))]
-            #;
-            [fail
-             (λ (template . args)
-               (λ (bs i σ)
-                 (failure [message (apply format template args)])))]
             [fail/context
              (λ (make)
                (λ (bs i σ)
@@ -89,33 +87,55 @@
                                disassemble-instruction-stream-inner))))]
             [disassemble-instruction-stream
              (>> (>>= position (mset 'initial))
-                 disassemble-instruction-stream-inner)])))
+                 disassemble-instruction-stream-inner
+                 (>>= position (mset 'final)))])))
 
-
-(define (σ→AST lsv σ)
-  (let ([instructions (hash-ref σ 'instructions)]
-        [start-i (hash-ref σ 'initial)])
-    ; instructions is a map from a left boundary to a `(succ ,instr ,next-i)
+(define (σ→directives lsv σ)
+  (let/ec return
+    ; instructions is a map from a left boundary to a (list) or (cons instr next-i)
     ; where instr is the instruction at that boundary and next-i is the right boundary
     ; start-i is the left boundary of the first instruction
-    (let ([start-ph (make-placeholder #f)])
-      (resolve-CFG-placeholders
-       lsv
-       ; this loop does a pass through the instructions
-       ; to create a map from left boundaries to placeholders
-       ; which contain the instruction sequence (itself indirected by internal placeholders)
-       (let loop ([i start-i]
-                  [phs (hash-set (hasheqv) start-i start-ph)])
-         (match (hash-ref instructions i)
-           [(list)
-            (placeholder-set! (hash-ref phs i) (list))
-            phs]
-           [(cons instr next-i)
-            (let ([ph (make-placeholder #f)])
-              (placeholder-set! (hash-ref phs i) (cons instr ph))
-              (loop next-i (hash-set phs next-i ph)))]))
-       start-ph)
-      (make-reader-graph start-ph))))
+    (let ([instructions (hash-ref σ 'instructions)])
+      (define-values (offset offset-map)
+        (let ([control (fix (instruction-control/version lsv))])
+          (values (control 'offset)
+                  (control 'offset-map))))
+      (let ([dst→ℓ (let ([dsts (let loop ([i (hash-ref σ 'initial)]
+                                          [dsts (seteqv)])
+                                 (match (hash-ref instructions i)
+                                   [(list)
+                                    dsts]
+                                   [(cons instr next-i)
+                                    (loop next-i
+                                          (cond
+                                            [(offset instr)
+                                             => (λ (dst)
+                                                  (cond
+                                                    [(= dst (hash-ref σ 'final))
+                                                     (if (< lsv 2)
+                                                       (return (error 'invalid-destination "cannot jump to end of instruction block prior to v2"))
+                                                       (set-add dsts dst))]
+                                                    [(hash-has-key? instructions dst)
+                                                     (set-add dsts dst)]
+                                                    [else
+                                                     (return (error 'invalid-destination "jump not on instruction boundary"))]))]
+                                            [else
+                                             dsts]))]))])
+                     (for/hasheqv ([i (in-list (sort (set->list dsts) <))]
+                                   [j (in-naturals 1)])
+                       (values i (string->symbol (format "label~a" j)))))])
+        (let loop ([i (hash-ref σ 'initial)])
+          (append (cond
+                    [(hash-ref dst→ℓ i #f)
+                     => (λ (ℓ) (list (label ℓ)))]
+                    [else
+                     (list)])
+                  (match (hash-ref instructions i)
+                    [(list)
+                     (list)]
+                    [(cons instr next-i)
+                     (cons (instruction [instruction (offset-map (λ (i) (hash-ref dst→ℓ i)) instr)]) 
+                           (loop next-i))])))))))
 
 (define (disassemble bs)
   (match (read-prefix bs)
@@ -125,10 +145,21 @@
        (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
                              bytecode 0 (hasheqv))
          [(success [xs (list)] σ)
-          (cons lsv (σ→AST lsv σ))]
+          (assembly [logic-sig-version lsv]
+                    [directives (σ→directives lsv σ)])]
          [(failure message)
-          (error 'disassemble message)]))]
+          (error 'disassemble-failure message)]))]
     [#f
-     (error 'disassemble "expected a logic signature version encoded as a varuint")]))
+     (error 'disassemble-bad-header "expected a logic signature version encoded as a varuint")]))
 
 (provide disassemble)
+
+(module+ main
+  (require racket/port
+           racket/pretty
+           "assembly/control.rkt")
+  
+  (pretty-print
+   (control-flow-graph
+    (disassemble
+     (port->bytes (current-input-port))))))

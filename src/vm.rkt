@@ -3,7 +3,8 @@
          (only-in racket/list take)
          "static/object.rkt"
          "static/sumtype.rkt"
-         (prefix-in i: "instruction/opcode.rkt"))
+         (prefix-in i: "instruction.rkt")
+         "assembly.rkt")
 
 (define vm0
   (inc (execute
@@ -23,13 +24,11 @@
        [step
         (>> (>>= read-instruction
                  (λ (instr)
-                   (>> (let ([lsv (instruction-version instr)])
-                         (if lsv
-                           (logic-sig-version>= lsv (instruction-name instr))
-                           ; instr is int or bytes (a pseudo-instruction)
-                           (unit))) 
+                   (>> (check-version! instr) 
                        (execute instr))))
             check-final)]
+       [check-version!
+        (λ (instr) (logic-sig-version>= (instruction-version instr) (instruction-name instr)))]
        [lookup-intcblock
         (λ (i)
           (>>= get-intcblock
@@ -383,13 +382,21 @@
   (inc (pop
         unit >>= >>)
        [execute
-        (match-lambda
-          [(i:varuint-immediate value)
+        (sumtype-case-lambda Pseudoinstruction
+          [(varuint-immediate value)
            (push value)]
-          [(i:bytes-immediate value)
+          [(bytes-immediate value)
            (push value)]
-          [instr
+          [(instruction [instruction instr])
            ((super 'execute) instr)])]
+       [check-version!
+        (sumtype-case-lambda Pseudoinstruction
+          [(varuint-immediate)
+           (unit)]
+          [(bytes-immediate)
+           (unit)]
+          [(instruction [instruction instr])
+           ((super 'check-version!) instr)])]
        [pop
         (λ ([n 1])
           (let loop ([n n]

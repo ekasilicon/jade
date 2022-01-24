@@ -369,7 +369,16 @@
            [11 (unit (GroupID))]
            [bc ((super 'decode-global-field) bc)])]
         [decode-app-params-field
-         (match-lambda)])
+         (match-lambda
+           [0 (unit (AppApprovalProgram))]
+           [1 (unit (AppClearStateProgram))]
+           [2 (unit (AppGlobalNumUint))]
+           [3 (unit (AppGlobalNumByteSlice))]
+           [4 (unit (AppLocalNumUint))]
+           [5 (unit (AppLocalNumByteSlice))]
+           [6 (unit (AppExtraProgramPages))]
+           [7 (unit (AppCreator))]
+           [8 (unit (AppAddress))])])
    (inc (unit)
         [decode-instruction
          (match-lambda
@@ -394,6 +403,6 @@
                    [logic-sig-version (unit 5)])
               read-byte-extras
               (inc (unit)
-                   [read-byte (unit 5)])))
+                   [read-byte (unit 3)])))
     'read-instruction)
    42))

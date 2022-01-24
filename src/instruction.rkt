@@ -1,6 +1,6 @@
 #lang racket/base
-(require "../static/record.rkt"
-         "../static/sumtype.rkt")
+(require "static/record.rkt"
+         "static/sumtype.rkt")
 
 (define-sumtype TransactionField1
   (Sender)
@@ -314,9 +314,3 @@
   (itxn_next))
 
 (provide (sumtype-out Instruction6))
-
-(record varuint-immediate (value))
-(record bytes-immediate (value))
-
-(provide varuint-immediate
-         bytes-immediate)

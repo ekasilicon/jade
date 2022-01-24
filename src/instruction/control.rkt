@@ -4,7 +4,7 @@
          "../static/sumtype.rkt"
          "../static/object.rkt"
          "../version.rkt"
-         "opcode.rkt")
+         "../instruction.rkt")
 
 (define instruction-control/version
   (make-*/version
@@ -118,62 +118,6 @@
            [(Instruction5 instr)
             ((super 'has-inorder-successor?) instr)]
            #:otherwise (λ (_) #t))])
-   (inc ()
-        [offset
-         (match-lambda
-           [(varuint-immediate) #f]
-           [(bytes-immediate) #f]
-           [instr ((super 'offset) instr)])]
-        [offset-map
-         (λ (f instr)
-           (match instr
-             [(varuint-immediate value) (varuint-immediate value)]
-             [(bytes-immediate value) (bytes-immediate value)]
-             [instr ((super 'offset-map) f instr)]))]
-        [has-inorder-successor?
-         (match-lambda
-           [(varuint-immediate) #t]
-           [(bytes-immediate) #t]
-           [instr ((super 'has-inorder-successor?) instr)])])))
+   (inc ())))
 
 (provide instruction-control/version)
-
-(define (resolve-CFG-placeholders lsv phs initial-ph)
-  (define-values (offset-map has-inorder-successor?)
-    (let ([o (fix (instruction-control/version lsv))])
-      (values (o 'offset-map)
-              (o 'has-inorder-successor?))))
-  ; this loop does a pass to fix instructions whose successor
-  ; isn't simply the next instruction
-  ; these instructions include terminal instructions,
-  ; such as err, return, and retsub,
-  ; and branching instructions,
-  ; such as bnz, bz, and callsub.
-  (let loop ([ph initial-ph])
-    (match (placeholder-get ph)
-      [(list)
-       (void)]
-      [(cons instr next-ph)
-       (let ([instr (offset-map
-                     (λ (offset)
-                       (cond
-                         [(hash-ref phs offset #f)
-                          => values]
-                         [else
-                          (error 'control "invalid offset ~a" offset)]))
-                     instr)])
-         (placeholder-set!
-          ph
-          (cons instr
-                ; instructions such as return, b, and err
-                ; never proceed to the next instruction
-                (if (has-inorder-successor? instr)
-                  next-ph
-                  (list)))))
-       (loop next-ph)]))
-  (make-reader-graph initial-ph))
-
-(provide resolve-CFG-placeholders)
-
-
-

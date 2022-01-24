@@ -4,13 +4,15 @@
          racket/port
          racket/pretty)
 
-(require "../src/parse.rkt"
-         "algoexplorer/extract.rkt"
+(require "algoexplorer/extract.rkt"
+         "../src/error.rkt"
+         ;"../src/parse.rkt"
          "../src/disassemble.rkt"
          "../src/unconstrained-property-analysis.rkt"
          "../src/debug.rkt")
 
 (match (current-command-line-arguments)
+  #;
   [(vector "showcase")
    (for-each
     (λ (path)
@@ -19,24 +21,33 @@
         (for ([r (in-set rs)])
           (pretty-print r))))
     (directory-list "showcase" #:build? #t))]
-  [(vector "algoexplorer")
-   (for-each
-    (λ (path)
+  [(vector "algoexplorer" net)
+   (pretty-print
+    (for/fold ([results (hasheq)])
+              ([path (in-list (directory-list (build-path "algoexplorer" net) #:build? #t))])
       (displayln path)
-      (void (time (disassemble (file-extract path 'approval-program))))
-      (let ([bs (call-with-input-file path port->bytes)])
-        (with-handlers ([exn:fail? (λ (e) (displayln (exn-message e)))])
-          (let* ([rs (analyze/json-package bs (hash))]
-                 [n (set-count rs)])
-            (if (zero? n)
-              (begin
-                (displayln "no states")
-                (pretty-print (disassemble (file-extract path 'approval-program))))
-              (begin
-                (displayln n)
-                (for ([r (in-set rs)])
-                  (pretty-print r))))))))
-    (directory-list "algoexplorer/mainnet" #:build? #t))]
+      #;(void (time (disassemble (file-extract path 'approval-program))))
+      (match (analyze/json-package (call-with-input-file path port->bytes) (hash))
+        [(error-result tag message)
+         (displayln tag)
+         (displayln message)
+         (hash-update results tag add1 0)]
+        [rs
+         (if (zero? (set-count rs))
+           (begin
+             (displayln 'no-states)
+             (displayln "no states")
+             (hash-update results 'no-states add1 0))
+           (hash-update results 'successes add1 0)
+             #;
+             (begin
+               
+               (pretty-print (disassemble (file-extract path 'approval-program))))
+             #;
+               (begin
+                 (displayln n)
+                 (for ([r (in-set rs)])
+                   (pretty-print r))))])))]
   [(vector "debug" paths ...)
    (for-each
     (λ (path)

@@ -33,6 +33,13 @@
     [(_ (d:id ...) e)
      #'(λ (myself) (field myself myself (d ...) e))]))
 
+(define-syntax define-dot
+  (syntax-parser
+    [(_ (d:id ...) x:id e)
+     #'(define x (dot (d ...) e))]
+    [(_ (d:id ...) (x . rst) e)
+     #'(define-dot (d ...) x (λ rst e))]))
+
 (define-syntax inc
   (syntax-parser
     [(_ (d:id ...) [f:id e] ...)
@@ -52,7 +59,7 @@
 (define (mix . ps)
   (foldr (λ (p p₀) (λ (self super) (p self (p₀ self super)))) (λ (self super) super) ps))
 
-(provide self super dot inc mix fix)
+(provide self super dot define-dot inc mix fix)
 
 (module+ main
   (let ([o (fix (inc () [hello 10]))])

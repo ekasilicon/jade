@@ -3,7 +3,7 @@
          "../static/sumtype.rkt"
          "../static/object.rkt"
          "../version.rkt"
-         "opcode.rkt")
+         "../instruction.rkt")
 
 (define instruction-version/version
   (make-*/version
@@ -43,12 +43,7 @@
            [(Instruction5 instr) 
             ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 6))])
-   (inc ()
-        [instruction-version
-         (match-lambda
-           [(varuint-immediate) #f]
-           [(bytes-immediate) #f]
-           [instr ((super 'instruction-version) instr)])])))
+   (inc ())))
 
 (provide instruction-version/version)
 
