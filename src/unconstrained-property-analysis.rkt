@@ -150,7 +150,6 @@
             (unit `(\|\| 0 ,x ,y))))]))
 
 (define (make-vm lsv)
-  #;
   (define-values (offset-map has-inorder-successor?)
          (let ([o (fix (mix (inc ()
                                  [offset-map
@@ -174,7 +173,6 @@
            (values (o 'offset-map)
                    (o 'has-inorder-successor?))))
   (mix
-   #;
    (inc (>> trace)
         [step
          (>> (trace (λ (ς _) (pretty-print

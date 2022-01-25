@@ -12,12 +12,8 @@
                      racket/match
                      syntax/parse))
 
-(record label (ℓ))
-
-(provide label)
-
 (define label-identifier
-  (lift (λ (c cs) (label [ℓ (string->symbol (apply string c cs))]))
+  (lift (λ (c cs) (string->symbol (apply string c cs)))
         (∘ (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-"))
            (p* (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")))) ))
 
@@ -235,7 +231,7 @@
 
   (parse-success (instruction-parser/version 2)
                  "bnz END"
-                 (bnz [offset (label [ℓ 'END])]))
+                 (bnz [offset 'END]))
 
   (parse-success (instruction-parser/version 2)
                  "substring 0 10"

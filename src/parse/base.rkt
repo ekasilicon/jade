@@ -2,7 +2,9 @@
 (require racket/match
          (only-in racket/string string-join))
 
+
 (define ((unit . xs) input i sk fk) (sk xs i fk))
+
 (define (fail input i sk fk) (fk))
 
 (define ((>>= m f) input i sk fk)
@@ -17,14 +19,6 @@
 (define (lift f p)
   (>>= p (λ xs (call-with-values (λ () (apply f xs)) unit))))
 
-(define ((∨ . ps) input i sk fk) 
-  (let loop ([ps ps])
-    (match ps
-      [(list)
-       (fk)]
-      [(cons p ps)
-       (p input i sk (λ () (loop ps)))])))
-
 (define (∘ . ps)
   (let loop ([ps ps])
     (match ps
@@ -32,6 +26,9 @@
        (unit)]
       [(cons p ps)
        (>>= p (λ (x) (>>= (loop ps) (λ xs (apply unit x xs)))))])))
+
+(define ((∨ . ps) input i sk fk) 
+  ((foldr (λ (p fk) (λ () (p input i sk fk)))  fk  ps)))
 
 (define (p* p)
   (∨ (>>= p (λ (x) (>>= (p* p) (λ (xs) (unit (cons x xs))))))

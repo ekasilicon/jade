@@ -1,12 +1,14 @@
 #lang racket/base
 (require racket/match
+         (only-in racket/string string-join)
          "../static/record.rkt"
+         "../static/object.rkt"
+         "../error.rkt"
          "base.rkt"
          "uint.rkt"
          "bytes.rkt"
-         "instruction.rkt")
-
-(record pragma (content))
+         "instruction.rkt"
+         "../assembly.rkt")
 
 (define pragma-directive
   (>> (literal "#pragma ")
@@ -25,7 +27,7 @@
   (>> (literal "//")
       (lift (λ (cs) (apply string cs)) (p* (p- (cc void) line-sentinel)))))
 
-#;
+
 (module+ test
   (parse-success (>> whitespace*
                      (>>0 (p? byte-parser)
@@ -33,7 +35,7 @@
                           (p? comment)
                           line-sentinel))
                  "\tbyte base64 ZWE=\n"
-                 (bytes-immediate [value #"ea\0"]))
+                 (bytes-immediate [value #"ea"]))
 
   (parse-success (>> whitespace*
                      (>>0 (p? byte-parser)
@@ -41,35 +43,12 @@
                           (p? comment)
                           line-sentinel))
                  "\tbyte base64 ZWE= // this is a comment\n"
-                 (bytes-immediate [value #"ea\0"])))
+                 (bytes-immediate [value #"ea"])))
 
 (define label-declaration
-  (>>0 label-identifier
+  (>>0 (>>= label-identifier (λ (ℓ) (unit (label ℓ))))
        space*
        (literal ":")))
-
-(require "../instruction/control.rkt")
-
-(define (resolve-control-flow lsv directives)
-  (let* ([initial-ph (make-placeholder #f)]
-         [phs (let loop ([directives directives]
-                         [ph initial-ph]
-                         [phs (hash)])
-                (match directives
-                  [(list)
-                   (placeholder-set! ph (list))
-                   phs]
-                  [(cons directive directives)
-                   (match directive
-                     [(label ℓ)
-                      (loop directives ph (hash-set phs (label ℓ) ph))]
-                     [(pragma)
-                      (loop directives ph phs)]
-                     [instruction
-                      (let ([next-ph (make-placeholder #f)])
-                        (placeholder-set! ph (cons instruction next-ph))
-                        (loop directives next-ph phs))])]))])
-    (resolve-CFG-placeholders lsv phs initial-ph)))
 
 (define (parse input)
   ((>> whitespace* (>>0 pragma-directive line-sentinel))
@@ -79,48 +58,51 @@
        [(list (pragma content))
         (match (regexp-match #px"^version (\\d+)$" content)
           [(list _ (app string->number lsv))
-           (let ([directive (∨ (∨ (instruction-parser/version lsv)
-                                  int-parser
-                                  byte-parser)
-                               pragma-directive
-                               label-declaration)])
-             (let ([line (>> whitespace*
-                             (>>0 (p? directive)
-                                  whitespace*
-                                  (p? comment)
-                                  line-sentinel))])
-               (cons
-                lsv
-                (resolve-control-flow
-                 lsv
-                 (let loop ([i i])
-                   ((>> whitespace* end-of-input)
-                    input i
-                    (λ (_ i fk) (list))
-                    (λ ()
-                      (line input i (λ (ds i fk)
-                                      (match ds
-                                        [(list directive)
-                                         (if directive
-                                           (cons directive (loop i))
-                                           (loop i))]
-                                        [_
-                                         (error 'parser "expected single result")]))
-                            (λ ()
-                              (error (report input i
-                                             "an instruction"
-                                             "a comment signalled by //"
-                                             "a #pragma directive")))))))))))]
+           (let* ([directive (∨ (∨ (>>= (instruction-parser/version lsv) (λ (instr) (unit (instruction [instruction instr]))))
+                                   int-parser
+                                   byte-parser)
+                                pragma-directive
+                                label-declaration)]
+                  [line (>> whitespace*
+                            (>>0 (p? directive)
+                                 whitespace*
+                                 (p? comment)
+                                 line-sentinel))])
+             (define (loop)
+               (∨ (>> whitespace* end-of-input (unit (list)))
+                  (>>= line (λ (directive)
+                              (if directive
+                                (>>= (loop)
+                                     (λ (directives)
+                                       (unit (cons directive directives))))
+                                (loop))))))
+             (match ((loop)
+                     input i
+                     (λ (xs i fk) (match xs [(list x) x]))
+                     (λ ()
+                       (error 'bad-directive
+                              (report input i
+                                      "an instruction"
+                                      "a comment signalled by //"
+                                      "a #pragma directive"))))
+               [(error-result tag message)
+                (error-result tag message)]
+               [directives
+                (assembly [logic-sig-version lsv] directives)]))]
           [#f
-           (error (report input 0 "#pragma version <teal-version>"))])]))
-   (λ () (error (report input 0 "#pragma version <teal-version>")))))
+           (error 'teal-version-missing (report input 0 "#pragma version <teal-version>"))])]))
+   (λ () (error 'teal-version-missing (report input 0 "#pragma version <teal-version>")))))
 
 (provide parse)
 
 (module+ main
   (require racket/port
-           racket/pretty)
+           racket/pretty
+           "../assembly/show.rkt"
+           "../assembly/control.rkt")
 
   (let ([input (port->string (current-input-port))])
-    (let ([directives (time (parse input))])
-      (pretty-print directives))))
+    (displayln input)
+    (let ([asm (time (parse input))])
+      (displayln (assembly-show asm))
+      (pretty-print (control-flow-graph asm)))))

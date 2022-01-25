@@ -2,8 +2,7 @@
 (require racket/match
          racket/cmdline
          racket/port
-         "parse/uint.rkt"
-         "parse/bytes.rkt"
+         "parse.rkt"
          "unconstrained-property-analysis.rkt")
 
 (let ([constants (hash)]
