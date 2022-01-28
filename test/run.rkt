@@ -6,13 +6,14 @@
 
 (require "algoexplorer/extract.rkt"
          "../src/error.rkt"
-         ;"../src/parse.rkt"
+         "../src/parse.rkt"
          "../src/disassemble.rkt"
          "../src/unconstrained-property-analysis.rkt"
          "../src/debug.rkt")
 
 (match (current-command-line-arguments)
-  #;
+  [(vector)
+   (displayln "racket run showcase | algoexplorer <net-id> | debug <path> ...")]
   [(vector "showcase")
    (for-each
     (λ (path)
@@ -26,19 +27,29 @@
     (for/fold ([results (hasheq)])
               ([path (in-list (directory-list (build-path "algoexplorer" net) #:build? #t))])
       (displayln path)
-      #;(void (time (disassemble (file-extract path 'approval-program))))
-      (match (analyze/json-package (call-with-input-file path port->bytes) (hash))
-        [(error-result tag message)
-         (displayln tag)
-         (displayln message)
-         (hash-update results tag add1 0)]
-        [rs
-         (if (zero? (set-count rs))
-           (begin
-             (displayln 'no-states)
-             (displayln "no states")
-             (hash-update results 'no-states add1 0))
-           (hash-update results 'successes add1 0)
+      (let-values ([(rss cpu real gc) (time-apply analyze/json-package (list (call-with-input-file path port->bytes) (hash)))])
+        (match rss
+          [(list (error-result tag message))
+           (displayln tag)
+           (displayln message)
+           (hash-update results tag add1 0)]
+          [(list rs)
+           (if (zero? (set-count rs))
+             (begin
+               (displayln 'no-states)
+               (displayln "no states")
+               (hash-update results 'no-states add1 0))
+             (hash-update results
+                          'successes
+                          (λ (buckets)
+                            (hash-update
+                             buckets
+                             (let loop ([ms 3])
+                               (if (<= real ms)
+                                 ms
+                                 (loop (floor (* ms 3/2)))))
+                             add1 0))
+                            (hasheqv))
              #;
              (begin
                
@@ -47,7 +58,8 @@
                (begin
                  (displayln n)
                  (for ([r (in-set rs)])
-                   (pretty-print r))))])))]
+                   (pretty-print r))))]))
+      ))]
   [(vector "debug" paths ...)
    (for-each
     (λ (path)

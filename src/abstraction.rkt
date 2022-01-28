@@ -98,6 +98,13 @@
             [initialize-context
              (dot (transaction-property-put)
                   (transaction-property-put 'rekey-to #f))]
+            #;
+            [assess
+             (dot (unit >>=
+                   transaction-property-get)
+                  (>>= (transaction-property-get 'rekey-to)
+                       (λ (ocs)
+                         (unit "the RekeyTo assessment"))))]
             [assume/present
              (match-lambda
                [`(== 0 ,(i:RekeyTo) ,X)
@@ -137,14 +144,19 @@
 (provide rekey-to%)
 
 (define on-completion%
-  (mix (inc (unit >>= >>
-              mzero
-              transaction-property-get transaction-property-put)
+  (mix (inc ()
             [key
              (i:OnCompletion)]
             [initialize-context
              (dot (transaction-property-put)
                   (transaction-property-put 'on-completion (seteqv 0 1 2 4 5)))]
+            #;
+            [assess
+             (dot (unit >>=
+                   transaction-property-get)
+                  (>>= (transaction-property-get 'on-completion)
+                       (λ (ocs)
+                         (unit "the OnCompletion assessment"))))]
             [assume/present
              (match-lambda
                [`(== 0 ,(i:OnCompletion) ,(? exact-nonnegative-integer? X))

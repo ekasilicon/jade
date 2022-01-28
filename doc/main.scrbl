@@ -1,25 +1,41 @@
 #lang scribble/base
+@(require scribble/manual)
+
+@title{Jade: A TEAL static analysis tool}
 
 Jade is a static analysis tool for TEAL bytecode.
 
-Currently, Jade supports a single analysis, @secref{unconstrained-parameter-analysis}.
-We are currently working to enhance Jade with multiple analyses.
+Jade performs @seclink["unconstrained-property-analysis"]{unconstrained property analysis} to determine which transaction properties the TEAL program allows to freely vary.
+Over time, Jade will accrue more (and more in-depth) analyses.
 
-We intend for most of the analyses Jade features to be @deftech{fully-automatic}
-meaning that the analysis requires only a specification of its execution environment (e.g. via command-line arguments) to succeed.
-@secref{unconstrained-parameter-analysis} is @reftech{fully-automatic} in this sense.
-(We also intend for Jade to feature some @deftech{semi-automatic} analyses which can establish deeper properties about DApps but require expert guidance to succeed.)
+Jade is @deftech{fully-automatic}, meaning that a user can analyze a target program simply by invoking Jade on it.
+Users can refine the execution environment (via command-line arguments) that Jade models to obtain a more precise analysis.
+In the future, Jade will feature some @deftech{semi-automatic} analysis which, with the help of expert guidance, can establish deeper properties about target programs.
 
 @section[#:tag "installation"]{Installation}
 
-Jade is written in @link{Racket} and uses the @link{Z3} SMT solver.
+Jade is written in @hyperlink["https://racket-lang.org"]{Racket}.
 
 In a clone of the @link{Jade repository}, you can invoke Jade using XXX.
 
 Alternatively, if you have Docker installed, you can run the Docker file present at the repository top level.
 
-@section[#:tag "unconstrained-parameter-analysis"]{Unconstrained Parameter Analysis}
+@section[#:tag "unconstrained-property-analysis"]{Unconstrained Property Analysis}
 
+@(define txnfield tt)
+
+A TEAL program executes in a transaction environment.
+The values of properties within this environment can (and typically do) affect program execution and post-execution actions taken by the virtual machine.
+Unless a program protects itself, a malicious user can craft an execution environment which can devastate the function of the DApp a particular smart contract supports, including the protection it offers to user resources.
+
+Jade verifies that a program protects itself in all cases from a particular set of general attacks.
+For example, Jade verifies that a program constrains the @txnfield{OnCompletion} property, which dictates the contract-global action to be taken post-execution (including replacement or deletion of the executed contract).
+
+@;{
+
+Specifically, Jade verifies that a pr
+Thus, 
+in which the values of various properties
 Each execution of a transaction takes place within an environment comprising the current state of the blockchain and a transaction group.
 Each transaction in the group has a number of parameters which can be set freely.
 
@@ -156,93 +172,7 @@ the conditions under which it does so.
 It is achieved by a series of increasingly sophisticated, precise, 
 and costly analyses.
 
-Consider this cheap analysis for the fields OnCompletion and 
-RekeyTo in particular.
-The analyzer interprets all arithmetic/logic instructions
-symbolically, so that the stack contains symbolic expressions.
-When a branch is encountered, the symbolic expression serving 
-as the guard is scanned for an occurrence of OnCompletion or 
-RekeyTo.
-If one is found, the symbolic expression is interpreted---
-matched against one of several simple known forms---to refine
-the abstract value of the field in the machine state.
-
-For example, when an ApprovalProgram runs, the abstract value 
-of the OnCompletion property is { 0, 1, 2, 4, 5 }.
-Suppose the program contains the sequence
-
-txn OnCompletion
-push 1
-==
-txn OnCompletion
-push 2
-==
-||
-txn OnCompletion
-push 4
-==
-||
-txn OnCompletion
-push 5
-||
-bz good
-err
-good:
-...
-
-Upon encountering the `bz` instruction, the symbolic expression is
-
-(∨ (∨ (∨ (= OnCompletion 1)
-         (= OnCompletion 2))
-      (= OnCompletion 4))
-   (= OnCompletion 5))
-
-Regardless of whether OnCompletion or RekeyTo appears in the expression,
-the analyzer proceeds to decide whether it can be zero and nonzero, first
-by processing negations, conjunctions, and disjunctions.
-
-To decide whether it can be nonzero is to `assume` it.
-When `assume` encounters a disjunction, it splits the world, assuming in
-turn each side of the disjunction.
-Recurring, the analyzer will split into four parts.
-To `assume` (= OnCompletion x) is to constrain the OnCompletion abstract
-value to be its current value intersected with { x }.
-If the result is the empty set, then the assumption is false.
-If the result is not the empty set, then the assumption can be satisfied
-with the non-empty set as the newly-assumed value.
-Each of these four cases leads to the contract executing `err`, 
-an unsuccessful execution of the program.
-
-To decide whether it can be zero is to `refute` it, or to `assume` its
-negation.
-`assume` implements that `(¬ (∨ A B))` ≡ `(∧ (¬ A) (¬ B))` which,
-recurring, yields
-
-(∧ (∧ (∧ (¬ (= OnCompletion 1))
-         (¬ (= OnCompletion 2)))
-      (¬ (= OnCompletion 4)))
-   (¬ (= OnCompletion 5)))
-
-A conjunction is handled by processing each side in turn, on the same path.
-The interpretation of `(¬ (= OnCompletion 1))` is to subtract the set { x }
-from the current value of OnCompletion, i.e., intersect it with the complement
-of { x }.
-If the result is the empty set, then it cannot be refuted, and the value cannot
-be zero.
-In this example, the initial value of { 0, 1, 2, 4, 5 } becomes { 0, 2, 4, 5 },
-{ 0, 4, 5 }, { 0, 5 }, and then { 0 }, before continuing at label `good`.
-
-The OnCompletion interpretation is dispatched only once the negations, 
-conjunctions, and disjunctions have been handled.
-If the term does not contain the `OnCompletion` property (or another of interest),
-then it can be ignored.
-The result is a less-precise analysis, but not a less-safe analysis as ignoring
-those terms allows the analysis to explore only more of the execution space.
-
-The stack is not the only place that the `OnCompletion` property could conceivably
-be stored.
-It could also be stored in storage or even global or local storage.
-Thus, these features should be soundly approximated.
+[cut out]
 
 The suite of programs from scratch will include strange ways of handling these
 properties, including each of these.
@@ -300,3 +230,32 @@ any number of typeclasses
 
 (define-instance Show Number
   [show (λ (n) (print n))])
+
+The TEAL language evolves to include new opcodes and for the interpretation of previous opcodes to change.
+
+The goal of the analyzer is to be faithful to the Go implementation.
+In some cases, that implementation may change to change the semantics
+of existing TEAL programs.
+Of course, the maintainers of that implementation will strive to make
+such changes as small as possible to avoid disrupting contracts on the
+chain.
+Nevertheless, this kind of change is possible.
+
+The utility of the analyzer stems from it being a reflection of how
+the Go implementation works, not how it used to work or how it should
+work.
+Thus, these changes can be accommodated in the analyzer simply by
+changing its code.
+An example of this kind of change is the execution cost accounting.
+I need to consult the code to be sure, but I believe that the cost
+of all programs is enforced dynamically rather than statically now.
+This technically allows more programs to run since the conservative
+static metric is coarse, but I would imagine most programs targeting
+a version before dynamic cost accounting would remain within it.
+
+
+Each program declares a TEAL version which is tantamount to choosing the language in which it is written.
+New TEAL versions often add new opcodes and sometimes change the semantics of previous opcodes.
+For example, before version 2, it was illegal to jump to the end of the program; from version 2 on, such a jump is legal.
+Similarly, before version 4, it was illegal to jump backwards; from version 4 on, such a jump is legal.
+}

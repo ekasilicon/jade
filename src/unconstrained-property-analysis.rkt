@@ -173,6 +173,7 @@
            (values (o 'offset-map)
                    (o 'has-inorder-successor?))))
   (mix
+   #;
    (inc (>> trace)
         [step
          (>> (trace (λ (ς _) (pretty-print
@@ -478,55 +479,32 @@
                            local-num-uint
                            global-state))
 
-(define (run ctx mapped-constants)
-  (match ctx
-    [(execution-context approval-program
-                        clear-state-program
-                        global-num-byte-slice
-                        global-num-uint
-                        local-num-byte-slice
-                        local-num-uint
-                        global-state)
-     (match (control-flow-graph (disassemble approval-program))
-       [(cons lsv cfg)
-        (if (<= lsv 3)
-          (match (analyze (fix (make-vm lsv))
-                               (hasheq 'logic-sig-version lsv
-                                       'pc                cfg
-                                       'stack             (list)
-                                       'scratch-space     (hasheqv)
-                                       'intcblock         (list)
-                                       'bytecblock        (list)
-                                       'mapped-constants  mapped-constants)
-                               (list (hasheq)
-                                     #f
-                                     #f)
-                               #;
-                               (list (hash (i:Receiver)           #f
-                                           (i:OnCompletion)       (seteqv 0 1 2 4 5)
-                                           (i:ApprovalProgram)    approval-program
-                                           (i:ClearStateProgram)  clear-state-program
-                                           (i:RekeyTo)            `(???)
-                                           (i:GroupIndex)         #f
-                                           (i:GlobalNumUint)      global-num-uint
-                                           (i:GlobalNumByteSlice) global-num-byte-slice
-                                           (i:LocalNumUint)       local-num-uint
-                                           (i:LocalNumByteSlice)  local-num-byte-slice)
-                                     (hash (i:LogicSigVersion) (for/set ([i (in-range 1 lsv)]) i)
-                                           (i:GroupSize)       (for/set ([i (in-range 16)]) (add1 i)))
-                                     global-state))
-            [(error-result tag message)
-             (error-result tag message)]
-            [ctxs
-             (for/set ([ctx (in-set ctxs)])
-               (match-let ([(list txn glbl glbl-state) ctx])
-                 txn))]) 
-          (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))]
-       [#f
-        (error 'bad-binary-prefix "unable to read initial logic signature version")])]))
+(define (run asm ctx mapped-constants)
+  (error->>= (control-flow-graph asm)
+             (match-lambda
+               [(cons lsv cfg)
+                (if (<= lsv 3)
+                  (error->>= (analyze (fix (make-vm lsv))
+                                      (hasheq 'logic-sig-version lsv
+                                              'pc                cfg
+                                              'stack             (list)
+                                              'scratch-space     (hasheqv)
+                                              'intcblock         (list)
+                                              'bytecblock        (list)
+                                              'mapped-constants  mapped-constants)
+                                      (list (hasheq)
+                                            #f
+                                            #f))
+                             (λ (ctxs)
+                               (for/set ([ctx (in-set ctxs)])
+                                 (match-let ([(list txn glbl glbl-state) ctx])
+                                   txn))))
+                  (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))])))
 
-(define (analyze/raw-binary program-type bs constants)
-  42)
+(define (analyze/raw-binary bs mapped-constants)
+  (error->>= (disassemble bs)
+             (λ (asm)
+               (run asm #f mapped-constants))))
 
 (require json
          net/base64)
@@ -559,7 +537,8 @@
                                              [2 (hash-ref value 'uint)]))]))]
                              [_
                               #f])])
-         (run (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
+         (run (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
+              (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
                                  [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
                                  global-num-byte-slice
                                  global-num-uint
@@ -573,30 +552,12 @@
 (provide analyze/raw-binary
          analyze/json-package)
 
-#;
-(define (analyze/assembly asm)
-  (match (control-flow-graph (parse asm))
-    [(cons lsv cfg)
-     (if (<= lsv 3)
-       (let ([ctxs (time
-                    (analyze (fix (make-vm lsv))
-                             (hasheq 'logic-sig-version lsv
-                                     'pc                cfg
-                                     'stack             (list)
-                                     'scratch-space     (hasheqv)
-                                     'intcblock         (list)
-                                     'bytecblock        (list))
-                             (list (hasheq)
-                                   #f
-                                   #f)))])
-         (for/set ([ctx (in-set ctxs)])
-           (match-let ([(list txn glbl glbl-state) ctx])
-             txn))) 
-       (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))]
-    [#f
-     (error 'assembly-parse-failure "unable to parse assembly")]))
+(require "parse.rkt")
 
-#;
+(define (analyze/assembly assembly)
+  (error->>= (parse assembly)
+             (λ (asm) (run asm #f (hash)))))
+
 (provide analyze/assembly)
 
 (module+ main
