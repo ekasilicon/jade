@@ -140,17 +140,20 @@
 (define (disassemble bs)
   (match (read-prefix bs)
     [(cons lsv bytecode)
-     (let ([disassemble (fix (mix (instruction-read/version lsv)
-                                  (disassemble/version lsv)))])
-       (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
-                             bytecode 0 (hasheqv))
-         [(success [xs (list)] σ)
-          (assembly [logic-sig-version lsv]
-                    [directives (σ→directives lsv σ)])]
-         [(failure message)
-          (error 'disassemble-failure message)]))]
+     (if (and (exact-nonnegative-integer? lsv)
+              (memv lsv '(1 2 3 4 5 6)))
+       (let ([disassemble (fix (mix (instruction-read/version lsv)
+                                    (disassemble/version lsv)))])
+         (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
+                               bytecode 0 (hasheqv))
+           [(success [xs (list)] σ)
+            (assembly [logic-sig-version lsv]
+                      [directives (σ→directives lsv σ)])]
+           [(failure message)
+            (error 'disassemble-failure message)]))
+       (error 'disassemble-bad-header "expected TEAL version 1, 2, 3, 4, 5, or 6 but got ~a" lsv))]
     [#f
-     (error 'disassemble-bad-header "expected a logic signature version encoded as a varuint")]))
+     (error 'disassemble-bad-header "expected TEAL version encoded as a varuint")]))
 
 (provide disassemble)
 

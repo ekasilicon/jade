@@ -103,43 +103,43 @@ Regardless of whether OnCompletion or RekeyTo appears in the expression,
 the analyzer proceeds to decide whether it can be zero and nonzero, first
 by processing negations, conjunctions, and disjunctions.
 
-To decide whether it can be nonzero is to `assume` it.
-When `assume` encounters a disjunction, it splits the world, assuming in
+To decide whether it can be nonzero is to `assume' it.
+When `assume' encounters a disjunction, it splits the world, assuming in
 turn each side of the disjunction.
 Recurring, the analyzer will split into four parts.
-To `assume` (= OnCompletion x) is to constrain the OnCompletion abstract
-value to be its current value intersected with { x }.
+To `assume' $\mathtt{OnCompletion} = X$ is to constrain the OnCompletion abstract
+value to be its current value intersected with $\{ X \}$.
 If the result is the empty set, then the assumption is false.
 If the result is not the empty set, then the assumption can be satisfied
 with the non-empty set as the newly-assumed value.
-Each of these four cases leads to the contract executing `err`, 
+Each of these four cases leads to the contract executing $\mathtt{err}$, 
 an unsuccessful execution of the program.
 
-To decide whether it can be zero is to `refute` it, or to `assume` its
+To decide whether it can be zero is to `refute' it, or to `assume' its
 negation.
-`assume` implements that $\neg (A \vee B) \equiv \neg A \wedge \neg B$ which,
+`assume' implements that $\neg (A \vee B) \equiv \neg A \wedge \neg B$ which,
 recurring, yields
 \[
 \neg \mathtt{OnCompletion} = 1 \wedge \neg \mathtt{OnCompletion} = 2 \wedge \neg \mathtt{OnCompletion} = 4 \wedge \neg \mathtt{OnCompletion} = 5
 \]
 
 A conjunction is handled by processing each side in turn, on the same path.
-The interpretation of \texttt{(¬ (= OnCompletion 1))} is to subtract the set $\{ x \}$
-from the current value of OnCompletion, i.e., intersect it with the complement
-of $\{ x \}$.
+The interpretation of $\neg\mathtt{OnCompletion} = X$ is to subtract the set $\{ X \}$
+from the current value of $\mathtt{OnCompletion}$, i.e., intersect it with the complement
+of $\{ X \}$.
 If the result is the empty set, then it cannot be refuted, and the value cannot
 be zero.
 In this example, the initial value of $\{ 0, 1, 2, 4, 5 \}$ becomes $\{ 0, 2, 4, 5 \}$,
-$\{ 0, 4, 5 \}$, $\{ 0, 5 \}$, and then $\{ 0 \}$, before continuing at label `good`.
+$\{ 0, 4, 5 \}$, $\{ 0, 5 \}$, and then $\{ 0 \}$, before continuing at label \texttt{good}.
 
-The OnCompletion interpretation is dispatched only once the negations, 
+The $\mathtt{OnCompletion}$ interpretation is dispatched only once the negations, 
 conjunctions, and disjunctions have been handled.
 If the term does not contain the `OnCompletion` property (or another of interest),
 then it can be ignored.
 The result is a less-precise analysis, but not a less-safe analysis as ignoring
 those terms allows the analysis to explore only more of the execution space.
 
-The stack is not the only place that the `OnCompletion` property could conceivably
+The stack is not the only place that the $\mathtt{OnCompletion}$ property could conceivably
 be stored.
 It could also be stored in storage or even global or local storage.
 Thus, these features should be soundly approximated.

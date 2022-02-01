@@ -222,7 +222,14 @@
                 [_
                  (unit)]))]
         [constant
-         unit]
+         (λ (x)
+           (>>= (get 'mapped-constants)
+                (λ (constants)
+                  (cond
+                    [(hash-ref constants x #f)
+                     => (λ (id) (unit `(constant 0 ,x)))]
+                    [else
+                     (unit x)]))))]
         [if0
          (λ (x m₀ m₁)
            (mplus (>> (refute x) m₀)
@@ -479,7 +486,7 @@
                            local-num-uint
                            global-state))
 
-(define (run asm ctx mapped-constants)
+(define (UPA asm ctx mapped-constants)
   (error->>= (control-flow-graph asm)
              (match-lambda
                [(cons lsv cfg)
@@ -501,80 +508,4 @@
                                    txn))))
                   (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))])))
 
-(define (analyze/raw-binary bs mapped-constants)
-  (error->>= (disassemble bs)
-             (λ (asm)
-               (run asm #f mapped-constants))))
-
-(require json
-         net/base64)
-
-(define (analyze/json-package bs constants)
-  (match (with-handlers ([exn:fail:read? (λ (e) (error 'invalid-json (exn-message e)))])
-           (read-json (open-input-bytes bs)))
-    [(error-result tag message)
-     (error-result tag message)]
-    [(hash-table ('id id)
-                 ('params (and params
-                               (hash-table ('approval-program    approval-program)
-                                           ('clear-state-program clear-state-program)
-                                           ('creator             creator)
-                                           ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
-                                                                             ('num-uint       global-num-uint)))
-                                           ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
-                                                                             ('num-uint       local-num-uint)))))))
-     (if (or (eq? approval-program 'null)
-             (eq? clear-state-program 'null))
-       (error 'program-missing "program was null in package")
-       (let ([global-state (match params
-                             [(hash-table ('global-state global-entries))
-                              (for/hash ([entry (in-list global-entries)])
-                                (match entry
-                                  [(hash-table ('key key) ('value value))
-                                   (values (base64-decode (string->bytes/utf-8 key))
-                                           (match (hash-ref value 'type)
-                                             [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
-                                             [2 (hash-ref value 'uint)]))]))]
-                             [_
-                              #f])])
-         (run (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
-              (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
-                                 [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
-                                 global-num-byte-slice
-                                 global-num-uint
-                                 local-num-byte-slice
-                                 local-num-uint
-                                 global-state)
-              constants)))]
-    [json
-     (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by the Algorand API v2?)")]))
-
-(provide analyze/raw-binary
-         analyze/json-package)
-
-(require "parse.rkt")
-
-(define (analyze/assembly assembly)
-  (error->>= (parse assembly)
-             (λ (asm) (run asm #f (hash)))))
-
-(provide analyze/assembly)
-
-(module+ main
-  (require json
-           net/base64)
-
-  (require racket/port)
-  
-  (match (current-command-line-arguments)
-    [(vector filenames ...)
-     (for-each
-      (λ (filename)
-        (displayln filename)
-        (match (analyze/json-package (call-with-input-file filename port->bytes) (hash))
-          [(error-result tag message)
-           (displayln tag)
-           (displayln message)]
-          [results
-           (pretty-print results)]))
-      filenames)]))
+(provide execution-context UPA)  
