@@ -5,18 +5,6 @@
          racket/match
          "sumtype.rkt")
 
-(define-syntax index→enumtype
-  (syntax-parser
-    [(_ typename:id)
-     (match (syntax-local-value #'typename (λ () #f))
-       [(sumtype-info variants _)
-        (with-syntax ([(i ...) (for/list ([i (in-naturals)]
-                                          [_ (in-list variants)])
-                                 i)]
-                      [(variant ...) variants])
-          #'(match-lambda [i (variant)] ...))]
-       [_
-        (raise-syntax-error 'index→enumtype "not a declared sumtype" #'typename)])]))
 (define-syntax sumtype-name
   (syntax-parser
     [(_ typename:id)
@@ -31,6 +19,21 @@
        [_
         (raise-syntax-error 'sumtype-name "not a declared sumtype" #'typename)])]))
 
+#;
+(define-syntax index→enumtype
+  (syntax-parser
+    [(_ typename:id)
+     (match (syntax-local-value #'typename (λ () #f))
+       [(sumtype-info variants _)
+        (with-syntax ([(i ...) (for/list ([i (in-naturals)]
+                                          [_ (in-list variants)])
+                                 i)]
+                      [(variant ...) variants])
+          #'(match-lambda [i (variant)] ...))]
+       [_
+        (raise-syntax-error 'index→enumtype "not a declared sumtype" #'typename)])]))
+
+#;
 (define-syntax enumtype-case
   (syntax-parser
     [(_ type:id expr [(name:id ...) body ...] ...)
@@ -49,6 +52,7 @@
              [(sumname _) body ...] ...
              #:otherwise x else-body ...)))]))
 
+#;
 (define-syntax (enumtype-case-lambda stx)
   (syntax-parse stx
     [(_ type . rst)

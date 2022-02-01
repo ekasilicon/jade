@@ -1,18 +1,20 @@
 #lang racket/base
 (require racket/match
-         racket/cmdline
+         (rename-in racket/cmdline [command-line r:command-line])
          racket/port
          json
+         net/base64
          "error.rkt"
          "parse.rkt"
+         "disassemble.rkt"
          "assembly/show.rkt"
          "unconstrained-property-analysis.rkt")
 
-(define result
+(define (command-line)
   (with-handlers ([exn:fail? (λ (e) (error 'racket-error (exn-message e)))])
-    (let ([constants (hash)]
+    (let ([mapped-constants (hash)]
           [mode #f])
-      (command-line
+      (r:command-line
        #:program "jade"
        #:argv (current-command-line-arguments)
        #:usage-help
@@ -34,7 +36,7 @@
         (let ([symbol (string->symbol symbol)]
               [parsed-bytes-constant (parse-bytes bytes-constant)])
           (cond
-            [(hash-ref constants parsed-bytes-constant #f)
+            [(hash-ref mapped-constants parsed-bytes-constant #f)
              => (match-lambda
                   [(cons symbol₀ bytes-constant₀)
                    (unless (eq? symbol₀ symbol)
@@ -45,7 +47,7 @@
                              symbol)
                      (exit 255))])]
             [else
-             (set! constants (hash-set constants parsed-bytes-constant (cons symbol bytes-constant)))]))]
+             (set! mapped-constants (hash-set mapped-constants parsed-bytes-constant (cons symbol bytes-constant)))]))]
        [("--symbolic-uint" "-u") symbol uint-constant
         ("Treats the use of <uint-constant> in a TEAL program"
          "as the symbolic value <symbol>."
@@ -59,7 +61,7 @@
         (let ([symbol (string->symbol symbol)]
               [parsed-uint-constant (parse-varuint uint-constant)])
           (cond
-            [(hash-ref constants parsed-uint-constant #f)
+            [(hash-ref mapped-constants parsed-uint-constant #f)
              => (match-lambda
                   [(cons symbol₀ uint-constant₀)
                    (unless (eq? symbol₀ symbol)
@@ -70,7 +72,7 @@
                              symbol)
                      (exit 255))])]
             [else
-             (set! constants (hash-set constants parsed-uint-constant (cons symbol uint-constant)))]))]
+             (set! mapped-constants (hash-set mapped-constants parsed-uint-constant (cons symbol uint-constant)))]))]
        #:once-any
        [("--json-package")
         ("Tell jade to expect a JSON-encoded bytecode package which"
@@ -92,6 +94,9 @@
        [("--raw-binary")
         ("Tell jade to expect raw bytecode binary on standard input")
         (set! mode 'raw-binary)]
+       [("--assembly")
+        ("Tell jade to expect assembly on standard input")
+        (set! mode 'assembly)]
        #:usage-help
        "It expects either the --json-package flag or the --raw-binary flag,"
        "each documented below."
@@ -101,30 +106,19 @@
            (if (bytes=? bs #"")
              (error 'no-standard-input "Expected ~a on standard input." expected)
              bs)))
-       
-(define (analyze/raw-binary bs mapped-constants)
-  )
-
-(require net/base64)
-
-(define (analyze/json-package pkg constants)
-  )
-
-(provide analyze/raw-binary
-         analyze/json-package)
-
-(require "parse.rkt")
-
-(define (analyze/assembly assembly)
-  (error->>= (parse assembly)
-             (λ (asm) (run asm #f (hash)))))
-
-(provide analyze/assembly)
-
        (match mode
          ['raw-binary
           (error->>= (standard-input-bytes "raw binary")
-                     (λ (bs) (λ () (error->>= (disassemble bs) (λ (asm) (UPA asm #f mapped-constants))))))]
+                     (λ (bs) (λ () (error->>= (disassemble bs)
+                                              (λ (asm)
+                                                (list (cons 'assembly (assembly-show asm))
+                                                      (cons 'UPA      (UPA asm #f mapped-constants))))))))]
+         ['assembly
+          (error->>= (standard-input-bytes "assembly")
+                     (λ (bs) (λ () (error->>= (parse (bytes->string/utf-8 bs))
+                                              (λ (asm)
+                                                (list (cons 'assembly (assembly-show asm))
+                                                      (cons 'UPA      (UPA asm #f mapped-constants))))))))]
          ['json-package
           (error->>= (standard-input-bytes "JSON package")
                      (λ (bs)
@@ -156,15 +150,17 @@
                                                                [_
                                                                 #f])])
                                            (error->>= (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
-                                                      (λ (asm) (UPA asm
-                                                                    (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
-                                                                                       [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
-                                                                                       global-num-byte-slice
-                                                                                       global-num-uint
-                                                                                       local-num-byte-slice
-                                                                                       local-num-uint
-                                                                                       global-state)
-                                                                    mapped-constants)))))]
+                                                      (λ (asm)
+                                                        (list (cons 'assembly (assembly-show asm))
+                                                              (cons 'UPA      (UPA asm
+                                                                                   (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
+                                                                                                      [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
+                                                                                                      global-num-byte-slice
+                                                                                                      global-num-uint
+                                                                                                      local-num-byte-slice
+                                                                                                      local-num-uint
+                                                                                                      global-state)
+                                                                                   mapped-constants)))))))]
                                       [json
                                        (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by the Algorand API v2?)")])))))]
          [#f
@@ -187,27 +183,41 @@ MESSAGE
             [_
              (error 'bad-flag "Expected either --raw-binary or --json-package flag.")])])))))
 
-(uncaught-exception-handler
- (λ (e)
-   (displayln "jade internal error:")
-   (cond
-     [(exn? e)
-      (displayln (exn-message e))]
-     [else
-      (displayln e)])
-   (exit 255)))
+(provide command-line)
 
-(define (report-error tag message)
-  (display "ERROR ")
-  (displayln message)
-  (exit 255))
+(module+ main
+  (define result
+    (command-line))
 
-(match result
-  [(error-result tag message)
-   (report-error tag message)]
-  [action
-   (match (action)
-     [(error-result tag message)
-      (report-error tag message)]
-     [report
-      (displayln report)])])
+  (uncaught-exception-handler
+   (λ (e)
+     (displayln "jade internal error:")
+     (cond
+       [(exn? e)
+        (displayln (exn-message e))]
+       [else
+        (displayln e)])
+     (exit 255)))
+
+  (define (report-error tag message)
+    (display "ERROR ")
+    (displayln message)
+    (exit 255))
+  
+  (match result
+    [(error-result tag message)
+     (report-error tag message)]
+    [action
+     (match (action)
+       [(error-result tag message)
+        (report-error tag message)]
+       [reports
+        (for-each
+         (λ (report)
+           (displayln report)
+           (newline))
+         (map cdr reports))])]))
+
+
+
+
