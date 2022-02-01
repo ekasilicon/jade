@@ -17,7 +17,17 @@
        (let ([show (fix (mix (instruction-show/version lsv)
                              (inc ()
                                   [label-show
-                                   symbol->string])))])
+                                   symbol->string]
+                                  [uint8-show
+                                   number->string]
+                                  [uint-show
+                                   number->string]
+                                  [uints-show
+                                   (λ (ns) (string-join (map (self 'uint-show) ns) " "))]
+                                  [bytes-show
+                                   (λ (bs) (string-append "base64(" (bytes->string/utf-8 (base64-encode bs #"")) ")"))]
+                                  [bytess-show
+                                   (λ (bss) (string-join (map (self 'bytes-show) bss) " "))])))])
          (values (show 'instruction-show)
                  (show 'label-show))))
      (define directive-show

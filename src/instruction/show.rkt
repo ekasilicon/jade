@@ -103,7 +103,11 @@
         [transaction-field-show
          (enumtype-shower TransactionField2 transaction-field-show)]
         [global-field-show
-         (enumtype-shower GlobalField2 global-field-show)])
+         (enumtype-shower GlobalField2 global-field-show)]
+        [asset-holding-field-show
+         (enumtype-shower AssetHoldingField2 asset-holding-field-show)]
+        [asset-params-field-show
+         (enumtype-shower AssetParamsField2 asset-params-field-show)])
    (inc ()
         [instruction-show
          (instruction-shower Instruction3)]
@@ -122,7 +126,11 @@
         [transaction-field-show
          (enumtype-shower TransactionField5 transaction-field-show)]
         [global-field-show
-         (enumtype-shower GlobalField5 global-field-show)])
+         (enumtype-shower GlobalField5 global-field-show)]
+        [asset-params-field-show
+         (enumtype-shower AssetParamsField5 asset-params-field-show)]
+        [app-params-field-show
+         (enumtype-shower AppParamsField5 app-params-field-show)])
    (inc ()
         [instruction-show
          (instruction-shower Instruction6)])

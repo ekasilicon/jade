@@ -1,6 +1,7 @@
 #lang racket/base
 (require (only-in racket/match match match-lambda match-let failure-cont ==)
          (only-in racket/list append-map)
+         (only-in racket/string string-join)
          racket/set
          "static/object.rkt"
          "static/record.rkt"
@@ -9,7 +10,6 @@
          "monad.rkt"
          "assembly.rkt"
          "disassemble.rkt"
-         ;"parse.rkt"
          "assembly/control.rkt"
          "vm.rkt"
          "instruction/version.rkt"
@@ -503,9 +503,80 @@
                                             #f
                                             #f))
                              (λ (ctxs)
-                               (for/set ([ctx (in-set ctxs)])
-                                 (match-let ([(list txn glbl glbl-state) ctx])
-                                   txn))))
+                               (let ([txns (for/set ([ctx (in-set ctxs)])
+                                             (match-let ([(list txn glbl glbl-state) ctx])
+                                               txn))])
+                                 (cond
+                                   [(zero? (set-count txns))
+                                    #<<MSG
+Unconstrained Parameter Analysis Report
+
+CRITICAL
+
+Under the given environment constraints, the program
+CANNOT complete successfully.
+
+If you are sure that the program can complete successfully
+under the given environment constraints, then Jade is in
+error. Please notify the Jade maintainers via GitHub.
+
+MSG
+                                    ]
+                                   [else
+                                    (define-syntax-rule (⇒ A B) (or (not A) B))
+                                    (string-append
+                                     "Unconstrained Parameter Analysis Report\n\n"
+                                     (cdr
+                                      (list-ref
+                                       (sort
+                                        (for/list ([txn (in-set txns)])
+                                          (let ([on-completion (hash-ref txn 'on-completion)]
+                                                [application-id (hash-ref txn 'application-id)])
+                                            (cond
+                                              [(⇒ (> (set-count on-completion) 1)
+                                                  (equal? application-id '(= 0)))
+                                               (cons 0 #<<MSG
+OnCompletion OK
+
+Any successful execution in which multiple OnCompletion
+values are allowed must occur during contract creation
+(as ApplicationID is properly constrained to be 0).
+
+MSG
+                                                     )]
+                                              [(and (= (set-count on-completion) 5)
+                                                    (not (equal? application-id '(= 0))))
+                                               ; a stronger form of the condition that follows
+                                               (cons 2 #<<MSG
+OnCompletion CRITICAL FAILURE
+
+The OnCompletion property is not constrained *at all*
+in standard contract executions!
+MSG
+                                                     )]
+                                              [(not (⇒ (> (set-count on-completion) 1)
+                                                       (equal? application-id '(= 0))))
+                                               (cons 1 (format #<<MSG
+OnCompletion ALERT
+
+The OnCompletion property is only partially constrained
+on non-creation contract executions. In particular, its
+value can be any in the set
+
+  { ~a }
+
+~a.
+MSG
+                                                               (string-join (map number->string (sort (set->list on-completion) <)) ", ")
+                                                               (match application-id
+                                                                 [#f "during any execution"]
+                                                                 ['(= 0) "when the contract is being created"]
+                                                                 ['(≠ 0) "during a non-creation execution"])))]
+                                              [else
+                                               (raise 'UNREACHABLE)])))
+                                        >
+                                        #:key car)
+                                       0)))]))))
                   (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))])))
 
 (provide execution-context UPA)  
