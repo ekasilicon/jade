@@ -111,13 +111,17 @@
           (error->>= (standard-input-bytes "raw binary")
                      (λ (bs) (λ () (error->>= (disassemble bs)
                                               (λ (asm)
-                                                (list (cons 'assembly (assembly-show asm))
+                                                (list (cons 'assembly (string-append "Disassembled instructions"
+                                                                                     "\n"
+                                                                                     (assembly-show asm)))
                                                       (cons 'UPA      (UPA asm #f mapped-constants))))))))]
          ['assembly
           (error->>= (standard-input-bytes "assembly")
                      (λ (bs) (λ () (error->>= (parse (bytes->string/utf-8 bs))
                                               (λ (asm)
-                                                (list (cons 'assembly (assembly-show asm))
+                                                (list (cons 'assembly (string-append "Parsed instructions"
+                                                                                     "\n"
+                                                                                     (assembly-show asm))(assembly-show asm))
                                                       (cons 'UPA      (UPA asm #f mapped-constants))))))))]
          ['json-package
           (error->>= (standard-input-bytes "JSON package")
@@ -151,7 +155,9 @@
                                                                 #f])])
                                            (error->>= (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
                                                       (λ (asm)
-                                                        (list (cons 'assembly (assembly-show asm))
+                                                        (list (cons 'assembly (string-append "Disassembled instructions"
+                                                                                             "\n"
+                                                                                             (assembly-show asm)) )
                                                               (cons 'UPA      (UPA asm
                                                                                    (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
                                                                                                       [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
@@ -199,18 +205,19 @@ MESSAGE
         (displayln e)])
      (exit 255)))
 
-  (define (report-error tag message)
-    (display "ERROR ")
+  (define (report-error tag message show-error?)
+    (when show-error?
+      (display "ERROR "))
     (displayln message)
     (exit 255))
   
   (match result
     [(error-result tag message)
-     (report-error tag message)]
+     (report-error tag message #f)]
     [action
      (match (action)
        [(error-result tag message)
-        (report-error tag message)]
+        (report-error tag message #t)]
        [reports
         (for-each
          (λ (report)

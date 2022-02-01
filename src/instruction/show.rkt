@@ -5,7 +5,7 @@
          "../static/record.rkt"
          "../static/sumtype.rkt"
          "../static/object.rkt"
-         "opcode.rkt"
+         "../instruction.rkt"
          (for-syntax racket/base
                      racket/match
                      syntax/parse))

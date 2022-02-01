@@ -3,7 +3,7 @@
          "../static/sumtype.rkt"
          "../static/object.rkt"
          "../version.rkt"
-         "opcode.rkt"
+         "../instruction.rkt"
          "../read-byte.rkt")
 
 (define instruction-read/version

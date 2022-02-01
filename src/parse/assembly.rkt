@@ -50,6 +50,22 @@
        space*
        (literal ":")))
 
+(define int-parser
+  (make-instruction-parser "int" (λ (value) (varuint-immediate value)) guarded-varuint))
+
+(module+ test
+  (parse-success int-parser
+                 "int 25"
+                 (varuint-immediate [value 25])))
+
+(define byte-parser
+  (make-instruction-parser "byte" (λ (value) (bytes-immediate value)) guarded-bytes))
+
+(module+ test
+  (parse-success byte-parser
+                 "byte base64 ZWE="
+                 (bytes-immediate [value #"ea"])))
+
 (define (parse input)
   ((>> whitespace* (>>0 pragma-directive line-sentinel))
    input 0

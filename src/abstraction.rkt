@@ -2,8 +2,7 @@
 (require racket/match
          racket/set
          "static/object.rkt"
-         (prefix-in i: "instruction/opcode.rkt")
-         )
+         (prefix-in i: "instruction.rkt"))
 
 (define (present? f c)
   (letrec ([present? (match-lambda
