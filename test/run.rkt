@@ -11,12 +11,12 @@
 
 (match (current-command-line-arguments)
   [(vector)
-   (displayln "racket run showcase | algoexplorer <net-id> | debug <path> ...")]
-  [(vector "showcase")
+   (displayln "racket run synthetic | algoexplorer <net-id> | debug <path> ...")]
+  [(vector "synthetic" args ...)
    (for-each
     (λ (path)
       (displayln path)
-      (parameterize ([current-command-line-arguments (vector "--assembly")]
+      (parameterize ([current-command-line-arguments (list->vector (cons "--assembly" args))]
                      [current-input-port (open-input-bytes (call-with-input-file path port->bytes))])
         (match (command-line)
           [(error-result tag message)
@@ -28,8 +28,14 @@
               (display "ERROR ")
               (displayln message)]
              [reports
-              (for-each displayln (map cdr reports))])])))
-    (directory-list "showcase" #:build? #t))]
+              (for-each
+               (match-lambda
+                 [#f
+                  (void)]
+                 [(cons _ report)
+                  (displayln report)])
+               reports)])])))
+    (directory-list "synthetic" #:build? #t))]
   [(vector "algoexplorer" net)
    (pretty-print
     (for/fold ([results (hasheq)])

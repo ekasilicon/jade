@@ -1,0 +1,38 @@
+#pragma version 3
+// restriction on all branches
+  txn Amount
+  int 2
+  %
+  dup
+  int 0
+  ==
+  bz next1
+  global ZeroAddress
+  txn RekeyTo
+  ==
+  assert
+  int 0
+  txn OnCompletion
+  ==
+  assert
+  b done
+next1:
+  dup
+  int 1
+  ==
+  bz next2
+  global ZeroAddress
+  txn RekeyTo
+  ==
+  assert
+  int 0
+  txn OnCompletion
+  ==
+  assert
+  b done
+next2:
+  pop
+  err
+done:
+  pop
+  int 1

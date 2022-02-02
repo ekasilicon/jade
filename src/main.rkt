@@ -76,11 +76,11 @@
             [else
              (set! mapped-constants (hash-set mapped-constants parsed-uint-constant (cons symbol uint-constant)))]))]
        #:once-each
-       [("--no-assembly")
+       [("--no-assembly-report")
         ("Tell jade not to print the assembly of the ingested"
          "program.")
         (set! assembly? #f)]
-       [("--no-UPA")
+       [("--no-UPA-report")
         ("Tell jade not to run the Unconstrained Parameter Analysis.")
         (set! UPA? #f)]
        #:once-any

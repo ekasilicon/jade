@@ -1,0 +1,32 @@
+#pragma version 3
+// restriction on all branches, calculate conditions up front
+  global ZeroAddress
+  txn RekeyTo
+  ==
+  int 0
+  txn OnCompletion
+  ==
+  txn Amount
+  int 2
+  %
+  dup
+  int 0
+  ==
+  bz next1
+  pop
+  assert
+  assert
+  b done
+next1:
+  dup
+  int 1
+  ==
+  bz next2
+  pop
+  assert
+  assert
+  b done
+next2:
+  err
+done:
+  int 1

@@ -1,0 +1,11 @@
+#pragma version 3
+// up-front restriction of parameter
+global ZeroAddress
+txn RekeyTo
+==
+assert
+int 0
+txn OnCompletion
+==
+assert
+int 1
