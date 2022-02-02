@@ -142,8 +142,6 @@
                          (error->>= (with-handlers ([exn:fail:read? (λ (e) (error 'invalid-json "Package input not valid JSON"))])
                                       (read-json (open-input-bytes bs)))
                                     (letrec ([loop (match-lambda
-                                                     [(hash-table ('application application))
-                                                      (loop application)]
                                                      [(hash-table ('id id)
                                                                   ('params (and params
                                                                                 (hash-table ('approval-program    approval-program)
@@ -178,6 +176,10 @@
                                                                                                             local-num-byte-slice
                                                                                                             local-num-uint
                                                                                                             global-state)))))))]
+                                                     [(hash-table ('application application))
+                                                      (loop application)]
+                                                     [(hash-table ('message message))
+                                                      (error 'algoexplorer message)]
                                                      [json
                                                       (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by Algorand Indexer v2?)")])])
                                       loop)))))]
