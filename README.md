@@ -32,7 +32,7 @@ This functionality allows one to apply analysis results to all programs instanti
 Example:
 
 ```
-curl https://algoindexer.algoexplorerapi.io/v2/applications/<application-id> | jq -cM .application | ./jade --json-package
+curl https://algoindexer.algoexplorerapi.io/v2/applications/<application-id> | ./jade --json-package
 ```
 
 ## Roadmap

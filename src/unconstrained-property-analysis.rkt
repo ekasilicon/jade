@@ -485,13 +485,16 @@
 
 
 (define (assess ctxs)
+  (define OK "\x1b[32mOK\033[m")
+  (define ALERT "\x1b[33mALERT\033[m")
+  (define CRITICAL "\x1b[31mCRITICAL\033[m")
   (let ([txns (for/set ([ctx (in-set ctxs)])
                 (match-let ([(list txn glbl glbl-state) ctx])
                   txn))])
     (cond
       [(zero? (set-count txns))
-       (list (cons 2 #<<MSG
-CRITICAL
+       (list (cons 2 (format #<<MSG
+~a
 
 Under the given environment constraints, the program
 CANNOT complete successfully.
@@ -501,7 +504,7 @@ under the given environment constraints, then Jade is in
 error. Please notify the Jade maintainers via GitHub.
 
 MSG
-                                          ))]
+                             CRITICAL)))]
       [else
        (define-syntax-rule (⇒ A B) (or (not A) B))
        (define (triage txns f)
@@ -515,29 +518,29 @@ MSG
              (cond
                [(⇒ (> (set-count on-completion) 1)
                    (equal? application-id '(= 0)))
-                (cons 0 #<<MSG
-OnCompletion OK
+                (cons 0 (format #<<MSG
+OnCompletion ~a
 
 Any successful execution in which multiple OnCompletion
 values are allowed must occur during contract creation
 (as ApplicationID is properly constrained to be 0).
 
 MSG
-                                                     )]
+                                OK))]
                [(and (= (set-count on-completion) 5)
                      (not (equal? application-id '(= 0))))
                                         ; a stronger form of the condition that follows
-                (cons 2 #<<MSG
-OnCompletion CRITICAL FAILURE
+                (cons 2 (format #<<MSG
+OnCompletion ~a
 
 The OnCompletion property is not constrained *at all*
 in standard contract executions!
 MSG
-                                                   )]
+                                CRITICAL))]
                [(not (⇒ (> (set-count on-completion) 1)
                         (equal? application-id '(= 0))))
                 (cons 1 (format #<<MSG
-OnCompletion ALERT
+OnCompletion ~a
 
 The OnCompletion property is only partially constrained
 on non-creation contract executions. In particular, its
@@ -547,7 +550,8 @@ value can be any in the set
 
 ~a.
 MSG
-                                                             (string-join (map number->string (sort (set->list on-completion) <)) ", ")
+                                ALERT
+                                (string-join (map number->string (sort (set->list on-completion) <)) ", ")
                                 (match application-id
                                   [#f "during any execution"]
                                   ['(= 0) "when the contract is being created"]
@@ -559,18 +563,18 @@ MSG
          (λ (txn)
            (match (hash-ref txn 'rekey-to)
              [#f
-              (cons 1 #<<MSG
-RekeyTo ALERT
+              (cons 1 (format #<<MSG
+RekeyTo ~a
 
 The RekeyTo property is not constrained by the program.
 MSG
-                                                 )]
+                              ALERT))]
              [(i:ZeroAddress)
-              (cons 0 #<<MSG
-                    RekeyTo OK
+              (cons 0 (format #<<MSG
+RekeyTo ~a
 
 All executions constrain RekeyTo to ZeroAddress.
 MSG
-                                                )]))))])))   
+                              OK))]))))])))   
 
 (provide execution-context UPA current-UPA-report)

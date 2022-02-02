@@ -141,43 +141,46 @@
                        (λ ()
                          (error->>= (with-handlers ([exn:fail:read? (λ (e) (error 'invalid-json "Package input not valid JSON"))])
                                       (read-json (open-input-bytes bs)))
-                                    (match-lambda
-                                      [(hash-table ('id id)
-                                                   ('params (and params
-                                                                 (hash-table ('approval-program    approval-program)
-                                                                             ('clear-state-program clear-state-program)
-                                                                             ('creator             creator)
-                                                                             ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
-                                                                                                               ('num-uint       global-num-uint)))
-                                                                             ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
-                                                                                                               ('num-uint       local-num-uint)))))))
-                                       (if (or (eq? approval-program 'null)
-                                               (eq? clear-state-program 'null))
-                                         (error 'program-missing "Program was null in package")
-                                         (let ([global-state (match params
-                                                               [(hash-table ('global-state global-entries))
-                                                                (for/hash ([entry (in-list global-entries)])
-                                                                  (match entry
-                                                                    [(hash-table ('key key) ('value value))
-                                                                     (values (base64-decode (string->bytes/utf-8 key))
-                                                                             (match (hash-ref value 'type)
-                                                                               [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
-                                                                               [2 (hash-ref value 'uint)]))]))]
-                                                               [_
-                                                                #f])])
-                                           (error->>= (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
-                                                      (λ (asm)
-                                                        (list (assembly-report "Disassembled instructions" asm)
-                                                              (UPA-report asm
-                                                                          (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
-                                                                                             [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
-                                                                                             global-num-byte-slice
-                                                                                             global-num-uint
-                                                                                             local-num-byte-slice
-                                                                                             local-num-uint
-                                                                                             global-state)))))))]
-                                      [json
-                                       (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by the Algorand API v2?)")])))))]
+                                    (letrec ([loop (match-lambda
+                                                     [(hash-table ('application application))
+                                                      (loop application)]
+                                                     [(hash-table ('id id)
+                                                                  ('params (and params
+                                                                                (hash-table ('approval-program    approval-program)
+                                                                                            ('clear-state-program clear-state-program)
+                                                                                            ('creator             creator)
+                                                                                            ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
+                                                                                                                              ('num-uint       global-num-uint)))
+                                                                                            ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
+                                                                                                                              ('num-uint       local-num-uint)))))))
+                                                      (if (or (eq? approval-program 'null)
+                                                              (eq? clear-state-program 'null))
+                                                        (error 'program-missing "Program was null in package")
+                                                        (let ([global-state (match params
+                                                                              [(hash-table ('global-state global-entries))
+                                                                               (for/hash ([entry (in-list global-entries)])
+                                                                                 (match entry
+                                                                                   [(hash-table ('key key) ('value value))
+                                                                                    (values (base64-decode (string->bytes/utf-8 key))
+                                                                                            (match (hash-ref value 'type)
+                                                                                              [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
+                                                                                              [2 (hash-ref value 'uint)]))]))]
+                                                                              [_
+                                                                               #f])])
+                                                          (error->>= (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
+                                                                     (λ (asm)
+                                                                       (list (assembly-report "Disassembled instructions" asm)
+                                                                             (UPA-report asm
+                                                                                         (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
+                                                                                                            [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
+                                                                                                            global-num-byte-slice
+                                                                                                            global-num-uint
+                                                                                                            local-num-byte-slice
+                                                                                                            local-num-uint
+                                                                                                            global-state)))))))]
+                                                     [json
+                                                      (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by Algorand Indexer v2?)")])])
+                                      loop)))))]
          [#f
           (match (current-command-line-arguments)
             ; no arguments at all
