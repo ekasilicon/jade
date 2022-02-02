@@ -191,6 +191,51 @@
 
 (provide on-completion%)
 
+(define concrete-stack%
+  (inc (unit >>= >>
+        panic
+        get put upd)
+       [push
+        (λ (x) (upd 'stack (λ (stk) (cons x stk)) (list)))]
+       [pop
+        (>>= (get 'stack)
+             (match-lambda
+               [(cons x stk)
+                (>> (put 'stack stk)
+                    (unit x))]
+               [(list)
+                (panic "tried to pop an empty stack")]))]))
+
+(define concrete-cblock%
+  (inc (get put)
+       [get-intcblock
+        (get 'intcblock)]
+       [put-intcblock
+        (λ (xs) (put 'intcblock xs))]
+       [get-bytecblock
+        (get 'bytecblock)]
+       [put-bytecblock
+        (λ (bss) (put 'bytecblock bss))]))
+
+(define standard-in-mode%
+  (inc (unit >>= panic
+        get put)
+       [in-mode
+        (λ (target-mode info)
+          (>>= (get 'mode #f)
+               (match-lambda
+                 [#f
+                  (put 'mode target-mode)]
+                 [mode
+                  (if (eq? mode target-mode)
+                    (unit)
+                    (panic "need to be in mode ~a for ~a but in mode ~a" target-mode info mode))])))]))
+
+(provide concrete-stack%
+         concrete-cblock%
+         standard-in-mode%)
+
+
 #|
 
 

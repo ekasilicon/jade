@@ -13,6 +13,8 @@
 (define (command-line)
   (with-handlers ([exn:fail? (λ (e) (error 'racket-error (exn-message e)))])
     (let ([mapped-constants (hash)]
+          [assembly? #t]
+          [UPA? #t]
           [mode #f])
       (r:command-line
        #:program "jade"
@@ -73,6 +75,14 @@
                      (exit 255))])]
             [else
              (set! mapped-constants (hash-set mapped-constants parsed-uint-constant (cons symbol uint-constant)))]))]
+       #:once-each
+       [("--no-assembly")
+        ("Tell jade not to print the assembly of the ingested"
+         "program.")
+        (set! assembly? #f)]
+       [("--no-UPA")
+        ("Tell jade not to run the Unconstrained Parameter Analysis.")
+        (set! UPA? #f)]
        #:once-any
        [("--json-package")
         ("Tell jade to expect a JSON-encoded bytecode package which"
@@ -80,9 +90,9 @@
          "metadata."
          "jade uses this additional information to perform a better"
          "analysis and produce better diagnostics."
-         "The Application endpoint of the Algorand API v2 produces"
+         "The Application endpoint of the Algorand Indexer v2 produces"
          "acceptable packages."
-         "This API is implemented by the AlgoExplorer at"
+         "Such an endpoint is implemented by the AlgoExplorer at"
          ""
          "  https://algoexplorer.io"
          ""
@@ -106,23 +116,25 @@
            (if (bytes=? bs #"")
              (error 'no-standard-input "Expected ~a on standard input." expected)
              bs)))
+       (define (assembly-report description asm)
+         (and assembly?
+              (cons 'assembly (string-append description "\n" (assembly-show asm)))))
+       (define (UPA-report asm ctx)
+         (and UPA?
+              (cons 'UPA (UPA asm ctx mapped-constants))))
        (match mode
          ['raw-binary
           (error->>= (standard-input-bytes "raw binary")
                      (λ (bs) (λ () (error->>= (disassemble bs)
                                               (λ (asm)
-                                                (list (cons 'assembly (string-append "Disassembled instructions"
-                                                                                     "\n"
-                                                                                     (assembly-show asm)))
-                                                      (cons 'UPA      (UPA asm #f mapped-constants))))))))]
+                                                (list (assembly-report "Disassembled instructions" asm)
+                                                      (UPA-report asm #f)))))))]
          ['assembly
           (error->>= (standard-input-bytes "assembly")
                      (λ (bs) (λ () (error->>= (parse (bytes->string/utf-8 bs))
                                               (λ (asm)
-                                                (list (cons 'assembly (string-append "Parsed instructions"
-                                                                                     "\n"
-                                                                                     (assembly-show asm))(assembly-show asm))
-                                                      (cons 'UPA      (UPA asm #f mapped-constants))))))))]
+                                                (list (assembly-report "Parsed instructions" asm)
+                                                      (UPA-report asm #f)))))))]
          ['json-package
           (error->>= (standard-input-bytes "JSON package")
                      (λ (bs)
@@ -155,18 +167,15 @@
                                                                 #f])])
                                            (error->>= (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
                                                       (λ (asm)
-                                                        (list (cons 'assembly (string-append "Disassembled instructions"
-                                                                                             "\n"
-                                                                                             (assembly-show asm)) )
-                                                              (cons 'UPA      (UPA asm
-                                                                                   (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
-                                                                                                      [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
-                                                                                                      global-num-byte-slice
-                                                                                                      global-num-uint
-                                                                                                      local-num-byte-slice
-                                                                                                      local-num-uint
-                                                                                                      global-state)
-                                                                                   mapped-constants)))))))]
+                                                        (list (assembly-report "Disassembled instructions" asm)
+                                                              (UPA-report asm
+                                                                          (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
+                                                                                             [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
+                                                                                             global-num-byte-slice
+                                                                                             global-num-uint
+                                                                                             local-num-byte-slice
+                                                                                             local-num-uint
+                                                                                             global-state)))))))]
                                       [json
                                        (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by the Algorand API v2?)")])))))]
          [#f
@@ -220,10 +229,18 @@ MESSAGE
         (report-error tag message #t)]
        [reports
         (for-each
-         (λ (report)
-           (displayln report)
-           (newline))
-         (map cdr reports))])]))
+         (match-lambda
+           [#f
+            (void)]
+           [(cons _ report)
+            (match report
+              [(error-result tag message)
+               (display "ERROR ")
+               (display message)]
+              [report
+               (displayln report)])
+            (newline)])
+         reports)])]))
 
 
 
