@@ -10,7 +10,7 @@ jade's only dependency is an installation of [Racket](https://download.racket-la
 There is no obvious reason that earlier versions (within the last few years) should not work; please let us know if you run into problems with a specific version or platform.
 
 The `Dockerfile` in the repository is configured to obtain Racket and run jade.
-The included script [build.sh](build.sh) uses Docker to build jade and [run.sh] runs the newly-built jade, passing arguments.
+The included script [build.sh](build.sh) uses Docker to build jade and [run.sh](run.sh) runs the newly-built jade, passing arguments from the command line.
 
 ## Usage
 
