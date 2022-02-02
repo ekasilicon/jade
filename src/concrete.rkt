@@ -1,7 +1,12 @@
 #lang racket/base
-(require (only-in racket/match match match-lambda failure-cont)
+(require (only-in racket/match match match-lambda match-let failure-cont)
+         racket/set
+         "static/sumtype.rkt"
+         "static/object.rkt"
+         "error.rkt"
          "monad.rkt"
-         "disassemble.rkt"
+         "instruction/version.rkt"
+         "assembly/control.rkt"
          "vm.rkt"
          "abstraction.rkt")
 
@@ -10,13 +15,32 @@
   (failure! message)
   (returned code ctx))
 
+(define (bytes-value bs)
+  (if (bytes? bs) bs #""))
+(define (uint-value x)
+  (if (exact-nonnegative-integer? x) x 0))
+
+(define-syntax p
+  (syntax-rules ()
+    [(_ unit who n)
+     (λ xs (unit (apply who xs)))]))
+
+(define (lower x) (if x 1 0))
+(define (lift x) (not (zero? x)))
+(define (== a b) (lower (equal? a b)))
+(define & bitwise-and)
+(define % remainder)
+(define \| bitwise-ior)
+(define ^ bitwise-xor)
+(define ~ bitwise-not)
+
+
 (define (make-vm lsv)
   (mix
    (vm/version lsv)
    concrete-stack%
    concrete-cblock%
    standard-in-mode%
-   logical-connective%
    (inc (unit >>= >> mplus mzero
          assume refute
          get put upd)
@@ -121,7 +145,7 @@
              [else
               (unit (bytes-append (subbytes (bytes-value bs) 0 (uint-value idx))
                                   (bytes (uint-value b))
-                                  (subbytes (bytes-value bs) (add1 (uint-value idx)))))])) (p unit setbyte 1)]
+                                  (subbytes (bytes-value bs) (add1 (uint-value idx)))))]))]
         [balance (p unit balance 1)]
         [min-balance (p unit min-balance 1)]
         [sha256 (p unit sha256 1)]
@@ -249,58 +273,64 @@
    monad-extras
    (inc ()
         [unit
-          (λ values (λ (ς ctx) (list (underway values ς ctx))))]
+          (λ values (λ (ς ctx) (underway values ς ctx)))]
         [>>=
          (λ (m f)
            (λ (ς ctx)
-             (append-map
-              (sumtype-case-lambda Result
+             (sumtype-case Result (m ς ctx)
                 [(underway [values xs] ς ctx)
                  ((apply f xs) ς ctx)]
-                #:otherwise list)
-              (m ς ctx))))]
+                #:otherwise values)))]
         [get
          (let ([absent (string->uninterned-symbol "absent")])
            (λ (key [default absent])
              (λ (ς ctx)
-               (list (underway [values (list (if (eq? default absent)
-                                               (hash-ref ς key)
-                                               (hash-ref ς key default)))]
-                               ς ctx)))))]
+               (underway [values (list (if (eq? default absent)
+                                         (hash-ref ς key)
+                                         (hash-ref ς key default)))]
+                         ς ctx))))]
         [put
          (λ (key val)
            (λ (ς ctx)
-             (list (underway [values (list)] [ς (hash-set ς key val)] ctx))))]
+             (underway [values (list)] [ς (hash-set ς key val)] ctx)))]
         [upd
          (let ([absent (string->uninterned-symbol "absent")])
            (λ (key f [default absent])
              (λ (ς ctx)
-               (list (underway [values (list)]
-                               [ς (if (eq? default absent)
-                                    (hash-update ς key f)
-                                    (hash-update ς key f default))]
-                               ctx)))))]
+               (underway [values (list)]
+                         [ς (if (eq? default absent)
+                              (hash-update ς key f)
+                              (hash-update ς key f default))]
+                         ctx))))]
         [transaction-property-get
          (λ (key)
            (λ (ς ctx)
              (match-let ([(list txn glbl glbl-state) ctx])
-               (list (underway [values (list (hash-ref txn key))] ς ctx)))))]
+               (underway [values (list (hash-ref txn key))] ς ctx))))]
         [transaction-property-put
          (λ (key val)
            (λ (ς ctx)
              (match-let ([(list txn glbl glbl-state) ctx])
-               (list (underway [values (list)]
-                               ς
-                               [ctx (list (hash-set txn key val)
-                                          glbl
-                                          glbl-state)])))))]
+               (underway [values (list)]
+                         ς
+                         [ctx (list (hash-set txn key val)
+                                    glbl
+                                    glbl-state)]))))]
         [trace
          (λ (f)
            (λ (ς ctx)
              (f ς ctx)
-             (list (underway [values (list)] ς ctx))))])))
+             (underway [values (list)] ς ctx)))])))
 
-
+(define (execute vm ς ctx)
+  (let ([→ (vm 'step)])
+    (let loop ([ς ς]
+               [ctx ctx])
+      (sumtype-case Result (→ ς ctx)
+        [(underway [values (list)] ς ctx)
+         (loop ς ctx)]
+        #:otherwise values))))
+          
 ; logic/eval.go
 (define (eval asm eval-ctx)
   (error->>= (control-flow-graph asm)
@@ -315,43 +345,15 @@
                   [(< lsv (eval-ctx 'min-version))
                    (error "program version must be >= %d for this transaction group, but have version %d" lsv (eval-ctx 'min-version))]
                   [else
-                   (error->>= (analyze (fix (make-vm lsv))
-                                       (hasheq 'logic-sig-version lsv
-                                               'pc                cfg
-                                               'stack             (list)
-                                               'scratch-space     (hasheqv)
-                                               'intcblock         (list)
-                                               'bytecblock        (list))
-                                       (list (hasheq)
-                                             #f
-                                             #f))
-                             )
-           (actually-run-the-program)])
-                (if (<= lsv 3)
-                  
-                  (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))])))
-#;
-(match (((fix (mix read-byte-extras
-                        (inc ()
-                             [read-byte
-                              ...])))
-              'read-varuint)
-             bytecode)
-  [(cons lsv bytecode)
-   ]
-       [#f
-        (error "invalid version")]))
+                   (execute (fix (make-vm lsv))
+                            (hasheq 'logic-sig-version lsv
+                                    'pc                cfg
+                                    'stack             (list)
+                                    'scratch-space     (hasheqv)
+                                    'intcblock         (list)
+                                    'bytecblock        (list))
+                            (list (hasheq)
+                                  #f
+                                  #f))])])))
 
-; see dryrunCmd in clerk.go
-(define (execute txn-grp txn i)
-  )
-
-(define (dry-run txn-grp)
-  (for/fold ()
-            ([txn (in-list txn-grp)]
-             [i (in-naturals)])
-    ; need to return scratch space?
-    
-    (execute txn-grp txn i)))
-
-(provide dry-run)
+(provide eval)

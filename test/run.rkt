@@ -6,6 +6,7 @@
 
 (require "../src/error.rkt"
          "../src/main.rkt"
+         "../src/unconstrained-property-analysis.rkt"
          #;
          "../src/debug.rkt")
 
@@ -49,7 +50,17 @@
            (displayln message)
            (hash-update results tag add1 0)]
           [action
-           (let-values ([(rs cpu real gc) (time-apply action (list))])
+           (let-values ([(rs cpu real gc) (parameterize ([current-UPA-report
+                                                          (match-lambda
+                                                            [(list (cons 2 _))
+                                                             'no-states]
+                                                            [(list (cons x _)
+                                                                   _)
+                                                             (match x
+                                                               [0 'OK]
+                                                               [1 'alert]
+                                                               [2 'critical])])])
+                                            (time-apply action (list)))])
              (match rs
                [(list (error-result tag message))
                 (displayln tag)
@@ -65,17 +76,22 @@
                            (displayln message)
                            (hash-update results tag add1 0)]
                           [report
-                           (hash-update results
-                                        'successes
-                                        (λ (buckets)
-                                          (hash-update
-                                           buckets
-                                           (let loop ([ms 3])
-                                             (if (<= real ms)
-                                               ms
-                                               (loop (floor (* ms 3/2)))))
-                                           add1 0))
-                                        (hasheqv))]))]
+                           (let* ([results (hash-update results
+                                                        'success-statuses
+                                                        (λ (statuses) (hash-update statuses report add1 0))
+                                                        (hasheq))]
+                                  [results (hash-update results
+                                                        'success-times
+                                                        (λ (buckets)
+                                                          (hash-update
+                                                           buckets
+                                                           (let loop ([ms 3])
+                                                             (if (<= real ms)
+                                                               ms
+                                                               (loop (floor (* ms 3/2)))))
+                                                           add1 0))
+                                                        (hasheqv))])
+                             results)]))]
                   [else
                    (hash-update results 'no-UPA add1 0)])]))]))))]
   #;
