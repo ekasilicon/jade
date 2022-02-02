@@ -12,6 +12,7 @@
          "disassemble.rkt"
          "assembly/control.rkt"
          "vm.rkt"
+         (prefix-in i: "instruction.rkt")
          "instruction/version.rkt"
          "instruction/control.rkt"
          (rename-in "abstraction.rkt"
@@ -487,18 +488,19 @@ MSG
                                     ]
                                    [else
                                     (define-syntax-rule (⇒ A B) (or (not A) B))
+                                    (define (triage txns f)
+                                      (cdr (list-ref (sort (for/list ([txn (in-set txns)]) (f txn)) > #:key car) 0)))
                                     (string-append
                                      "Unconstrained Parameter Analysis Report\n\n"
-                                     (cdr
-                                      (list-ref
-                                       (sort
-                                        (for/list ([txn (in-set txns)])
-                                          (let ([on-completion (hash-ref txn 'on-completion)]
-                                                [application-id (hash-ref txn 'application-id)])
-                                            (cond
-                                              [(⇒ (> (set-count on-completion) 1)
-                                                  (equal? application-id '(= 0)))
-                                               (cons 0 #<<MSG
+                                     (triage
+                                      txns
+                                      (λ (txn)
+                                        (let ([on-completion (hash-ref txn 'on-completion)]
+                                              [application-id (hash-ref txn 'application-id)])
+                                          (cond
+                                            [(⇒ (> (set-count on-completion) 1)
+                                                (equal? application-id '(= 0)))
+                                             (cons 0 #<<MSG
 OnCompletion OK
 
 Any successful execution in which multiple OnCompletion
@@ -507,19 +509,19 @@ values are allowed must occur during contract creation
 
 MSG
                                                      )]
-                                              [(and (= (set-count on-completion) 5)
-                                                    (not (equal? application-id '(= 0))))
-                                               ; a stronger form of the condition that follows
-                                               (cons 2 #<<MSG
+                                            [(and (= (set-count on-completion) 5)
+                                                  (not (equal? application-id '(= 0))))
+                                             ; a stronger form of the condition that follows
+                                             (cons 2 #<<MSG
 OnCompletion CRITICAL FAILURE
 
 The OnCompletion property is not constrained *at all*
 in standard contract executions!
 MSG
-                                                     )]
-                                              [(not (⇒ (> (set-count on-completion) 1)
-                                                       (equal? application-id '(= 0))))
-                                               (cons 1 (format #<<MSG
+                                                   )]
+                                            [(not (⇒ (> (set-count on-completion) 1)
+                                                     (equal? application-id '(= 0))))
+                                             (cons 1 (format #<<MSG
 OnCompletion ALERT
 
 The OnCompletion property is only partially constrained
@@ -530,16 +532,32 @@ value can be any in the set
 
 ~a.
 MSG
-                                                               (string-join (map number->string (sort (set->list on-completion) <)) ", ")
-                                                               (match application-id
-                                                                 [#f "during any execution"]
-                                                                 ['(= 0) "when the contract is being created"]
-                                                                 ['(≠ 0) "during a non-creation execution"])))]
-                                              [else
-                                               (raise 'UNREACHABLE)])))
-                                        >
-                                        #:key car)
-                                       0)))]))))
+                                                             (string-join (map number->string (sort (set->list on-completion) <)) ", ")
+                                                             (match application-id
+                                                               [#f "during any execution"]
+                                                               ['(= 0) "when the contract is being created"]
+                                                               ['(≠ 0) "during a non-creation execution"])))]
+                                            [else
+                                             (raise 'UNREACHABLE)]))))
+                                     "\n"
+                                     (triage
+                                      txns
+                                      (λ (txn)
+                                        (match (hash-ref txn 'rekey-to)
+                                          [#f
+                                           (cons 1 #<<MSG
+RekeyTo ALERT
+
+The RekeyTo property is not constrained by the program.
+MSG
+                                                 )]
+                                          [(i:ZeroAddress)
+                                           (cons 0 #<<MSG
+RekeyTo OK
+
+All executions constrain RekeyTo to ZeroAddress.
+MSG
+                                                )]))))]))))
                   (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))])))
 
 (provide execution-context UPA)  
