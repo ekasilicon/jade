@@ -28,7 +28,9 @@
                        (execute instr))))
             check-final)]
        [check-version!
-        (λ (instr) (logic-sig-version>= (instruction-version instr) (instruction-name instr)))]
+        (λ (instr)
+          (logic-sig-version>= (instruction-version instr) (instruction-name instr)))]
+       #;
        [lookup-intcblock
         (λ (i)
           (>>= get-intcblock
@@ -36,6 +38,7 @@
              (if (< i (length xs))
                (constant (list-ref xs i))
                (panic "intcblock has ~a ints but index ~a requested" (length xs) i)))))]
+       #;
        [lookup-bytecblock
         (λ (i)
           (>>= get-bytecblock
@@ -331,8 +334,8 @@
                                (unit x))
                            (>>= (loop (sub1 n))
                                 (λ (y)
-                                  (push x)
-                                  (unit y)))))))
+                                  (>> (push x)
+                                      (unit y))))))))
                 push)]
           [(i:swap)
            swap]
@@ -351,52 +354,75 @@
            (primitive-apply setbyte 3)]
           [(i:min_balance)
            (>> (in-mode 'Application "min_balance")
-           (primitive-apply min-balance 1))]
+               (primitive-apply min-balance 1))]
           [(i:pushbytes [bytes bs])
            (primitive-apply constant 0 bs)]
           [(i:pushint [uint n])
            (primitive-apply constant 0 n)])]))
 
 (define vm4
-  (λ (self super)
-    (λ (msg)
-      (error 'vm4 "implement vm4 for ~a" msg)))
-  #;
-  (inc (get-pc
-        goto
-        >>=)
-       [jump
-        (λ (offset) (>>= get-pc (λ (pc) (goto (+ pc offset)))))]))
+  (inc ()
+       [execute
+        (sumtype-case-lambda i:Instruction4
+          [(i:Instruction3 instr)
+           ((super 'execute) instr)]
+          #:otherwise (λ (x) (error 'vm4 "implement ~a" x)))]))
 
 (define vm5
-  (λ (self super)
-    (λ (msg)
-      (error 'vm5 "implement vm5 for ~a" msg))))
+  (inc (>>= >>
+        in-mode
+        pop push
+        primitive-apply
+        log
+        extract
+        extract-uint
+        itxn-begin
+        itxn-field
+        itxn-submit)
+       [execute
+        (sumtype-case-lambda i:Instruction5
+          [(i:Instruction4 instr)
+           ((super 'execute) instr)]
+          [(i:log)
+           (>> (in-mode 'Application "log")
+               (primitive-apply log 1))]
+          [(i:extract start length)
+           (>>= (>>= (pop) (λ (bs) (extract bs start length))) push)]
+          [(i:extract3)
+           (primitive-apply extract 3)]
+          [(i:extract_uint64)
+           (primitive-apply extract-uint 2 8)]
+          [(i:itxn_begin)
+           (>> (in-mode 'Application "itxn_begin")
+               (primitive-apply itxn-begin 0))]
+          [(i:itxn_field field)
+           (>> (in-mode 'Application "itxn_field")
+               (primitive-apply itxn-field 1 field))]
+          [(i:itxn_submit)
+           (>> (in-mode 'Application "itxn_submit")
+               (primitive-apply itxn-submit 0))]
+          #:otherwise (λ (x) (error 'vm5 "implement ~a" x)))]))
 
 (define vm6
-  (λ (self super)
-    (λ (msg)
-      (error 'vm6 "implement vm6 for ~a" msg))))
+  (inc (>>
+        in-mode
+        primitive-apply
+        itxn-next
+        divw)
+       [execute
+        (sumtype-case-lambda i:Instruction6
+          [(i:Instruction5 instr)
+           ((super 'execute) instr)]
+          [(i:itxn_next)
+           (>> (in-mode 'Application "itxn_next")
+               (primitive-apply itxn-next 0))]
+          [(i:divw)
+           (primitive-apply divw 3)]
+          #:otherwise (λ (x) (error 'vm6 "implement ~a" x)))]))
 
 (define vm-extras
   (inc (pop
         unit >>= >>)
-       [execute
-        (sumtype-case-lambda Pseudoinstruction
-          [(varuint-immediate value)
-           (push value)]
-          [(bytes-immediate value)
-           (push value)]
-          [(instruction [instruction instr])
-           ((super 'execute) instr)])]
-       [check-version!
-        (sumtype-case-lambda Pseudoinstruction
-          [(varuint-immediate)
-           (unit)]
-          [(bytes-immediate)
-           (unit)]
-          [(instruction [instruction instr])
-           ((super 'check-version!) instr)])]
        [pop
         (λ ([n 1])
           (let loop ([n n]
@@ -412,9 +438,29 @@
         (λ (f stack-arity . xs)
           (>>= (>>= (pop stack-arity) (λ ys (apply f (append xs ys)))) push))]))
 
+(define vm-pseudo
+  (inc (unit push)
+       [execute
+        (sumtype-case-lambda Pseudoinstruction
+          [(varuint-immediate value)
+           (push value)]
+          [(bytes-immediate value)
+           (push value)]
+          [(instruction [instruction instr])
+           ((super 'execute) instr)])]
+       [check-version!
+        (sumtype-case-lambda Pseudoinstruction
+          [(varuint-immediate)
+           (unit)]
+          [(bytes-immediate)
+           (unit)]
+          [(instruction [instruction instr])
+           ((super 'check-version!) instr)])]))
+
 (require "version.rkt")
 
 (define vm/version
   (make-*/version 'vm/version vm0 vm1 vm2 vm3 vm4 vm5 vm6 vm-extras))
 
-(provide vm/version)
+(provide vm/version
+         vm-pseudo)
