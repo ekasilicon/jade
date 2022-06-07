@@ -58,6 +58,7 @@
                                                      ['uint #'(self 'uint-show)]
                                                      ['uints #'(self 'uints-show)]
                                                      ['bytess #'(self 'bytess-show)]
+                                                     ['index #'(self 'uint8-show)]
                                                      ['group-index #'(self 'uint8-show)]
                                                      ['array-index #'(self 'uint8-show)]
                                                      ['offset #'(self 'label-show)]
@@ -67,7 +68,7 @@
                                                      ['bytes #'(self 'bytes-show)]
                                                      ['field
                                                       (match (syntax->datum variant-id)
-                                                        [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas)
+                                                        [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas 'gitxn)
                                                          #'(self 'transaction-field-show)]
                                                         ['global #'(self 'global-field-show)]
                                                         ['asset_holding_get #'(self 'asset-holding-field-show)]

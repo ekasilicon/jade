@@ -3,7 +3,6 @@
          (only-in racket/set seteqv set-add set->list)
          "static/sumtype.rkt"
          "static/object.rkt"
-         "error.rkt"
          "monad.rkt"
          "read-byte.rkt"
          "prefix.rkt"
@@ -90,68 +89,83 @@
                  disassemble-instruction-stream-inner
                  (>>= position (mset 'final)))])))
 
+(define (jump-destinations lsv σ)
+  (let ([instructions (hash-ref σ 'instructions)]
+        [offset (let ([control (fix (instruction-control/version lsv))])
+                  (control 'offset))])
+    (let loop ([i (hash-ref σ 'initial)]
+               [dsts (seteqv)])
+      (match (hash-ref instructions i)
+        [(list)
+         dsts]
+        [(cons instr next-i)
+         (loop next-i
+               (cond
+                 [(offset instr)
+                  => (λ (dst)
+                       (cond
+                         [(= dst (hash-ref σ 'final))
+                          (if (< lsv 2)
+                            (error 'invalid-destination "cannot jump to end of instruction block prior to v2")
+                            (set-add dsts dst))]
+                         [(hash-has-key? instructions dst)
+                          (set-add dsts dst)]
+                         [else
+                          (error 'invalid-destination "jump not on instruction boundary")]))]
+                 [else
+                  dsts]))]))))
+
 (define (σ→directives lsv σ)
-  (let/ec return
-    ; instructions is a map from a left boundary to a (list) or (cons instr next-i)
-    ; where instr is the instruction at that boundary and next-i is the right boundary
-    ; start-i is the left boundary of the first instruction
-    (let ([instructions (hash-ref σ 'instructions)])
-      (define-values (offset offset-map)
-        (let ([control (fix (instruction-control/version lsv))])
-          (values (control 'offset)
-                  (control 'offset-map))))
-      (let ([dst→ℓ (let ([dsts (let loop ([i (hash-ref σ 'initial)]
-                                          [dsts (seteqv)])
-                                 (match (hash-ref instructions i)
-                                   [(list)
-                                    dsts]
-                                   [(cons instr next-i)
-                                    (loop next-i
-                                          (cond
-                                            [(offset instr)
-                                             => (λ (dst)
-                                                  (cond
-                                                    [(= dst (hash-ref σ 'final))
-                                                     (if (< lsv 2)
-                                                       (return (error 'invalid-destination "cannot jump to end of instruction block prior to v2"))
-                                                       (set-add dsts dst))]
-                                                    [(hash-has-key? instructions dst)
-                                                     (set-add dsts dst)]
-                                                    [else
-                                                     (return (error 'invalid-destination "jump not on instruction boundary"))]))]
-                                            [else
-                                             dsts]))]))])
-                     (for/hasheqv ([i (in-list (sort (set->list dsts) <))]
-                                   [j (in-naturals 1)])
-                       (values i (string->symbol (format "label~a" j)))))])
-        (let loop ([i (hash-ref σ 'initial)])
-          (append (cond
-                    [(hash-ref dst→ℓ i #f)
-                     => (λ (ℓ) (list (label ℓ)))]
-                    [else
-                     (list)])
-                  (match (hash-ref instructions i)
-                    [(list)
-                     (list)]
-                    [(cons instr next-i)
-                     (cons (instruction [instruction (offset-map (λ (i) (hash-ref dst→ℓ i)) instr)]) 
-                           (loop next-i))])))))))
+  ; instructions is a map from a left boundary to a (list) or (cons instr next-i)
+  ; where instr is the instruction at that boundary and next-i is the right boundary
+  ; start-i is the left boundary of the first instruction
+  (let ([instructions (hash-ref σ 'instructions)]
+        [offset-map (let ([control (fix (instruction-control/version lsv))])
+                      (control 'offset-map))])
+    (let ([dst→ℓ (let ([dsts (jump-destinations lsv σ)])
+                   (for/hasheqv ([i (in-list (sort (set->list dsts) <))]
+                                 [j (in-naturals 1)])
+                     (values i (string->symbol (format "label~a" j)))))])
+      (let loop ([i (hash-ref σ 'initial)])
+        (append (cond
+                  [(hash-ref dst→ℓ i #f)
+                   => (λ (ℓ) (list (label ℓ)))]
+                  [else
+                   (list)])
+                (match (hash-ref instructions i)
+                  [(list)
+                   (list)]
+                  [(cons instr next-i)
+                   (cons (instruction [instruction (offset-map (λ (i) (hash-ref dst→ℓ i)) instr)]) 
+                         (loop next-i))]))))))
+
+(define (instruction-map lsv bytecode)
+  (if (and (exact-nonnegative-integer? lsv)
+           (memv lsv '(1 2 3 4 5 6)))
+    (let ([disassemble (fix (mix (instruction-read/version lsv)
+                                 (inc (unit)
+                                      [logic-sig-version
+                                       (λ (bs i σ) (success [xs (list lsv)] i σ))])
+                                 (disassemble/version lsv)))])
+      (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
+                            bytecode 0 (hasheqv))
+        [(success [xs (list)] σ)
+         σ]
+        [(failure message)
+         (error 'disassemble-failure message)]))
+    (error 'disassemble-bad-header "expected TEAL version 1, 2, 3, 4, 5, or 6 but got ~a" lsv)))
+
+(provide jump-destinations
+         instruction-map)
+
+(require racket/pretty)
 
 (define (disassemble bs)
   (match (read-prefix bs)
     [(cons lsv bytecode)
-     (if (and (exact-nonnegative-integer? lsv)
-              (memv lsv '(1 2 3 4 5 6)))
-       (let ([disassemble (fix (mix (instruction-read/version lsv)
-                                    (disassemble/version lsv)))])
-         (sumtype-case Result ((disassemble 'disassemble-instruction-stream)
-                               bytecode 0 (hasheqv))
-           [(success [xs (list)] σ)
-            (assembly [logic-sig-version lsv]
-                      [directives (σ→directives lsv σ)])]
-           [(failure message)
-            (error 'disassemble-failure message)]))
-       (error 'disassemble-bad-header "expected TEAL version 1, 2, 3, 4, 5, or 6 but got ~a" lsv))]
+     (let ([σ (instruction-map lsv bytecode)])
+       (assembly [logic-sig-version lsv]
+                 [directives (σ→directives lsv σ)]))]
     [#f
      (error 'disassemble-bad-header "expected TEAL version encoded as a varuint")]))
 
@@ -161,8 +175,7 @@
   (require racket/port
            racket/pretty
            "assembly/control.rkt")
-  
-  (pretty-print
-   (control-flow-graph
-    (disassemble
-     (port->bytes (current-input-port))))))
+
+  (print-graph #t)
+  (let ([asm (disassemble (port->bytes (current-input-port)))])
+    (pretty-print (control-flow-graph asm #:project? #t))))

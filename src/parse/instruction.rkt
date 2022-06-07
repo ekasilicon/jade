@@ -103,6 +103,7 @@
                                               ['n #'guarded-uint8]
                                               ['uints #'(p* (>> whitespace* varuint))]
                                               ['bytess #'(p* (>> whitespace* bytes))]
+                                              ['index #'guarded-uint8]
                                               ['group-index #'guarded-uint8]
                                               ['array-index #'guarded-uint8]
                                               ['offset #'guarded-label]
@@ -113,7 +114,7 @@
                                               ['uint #'guarded-varuint]
                                               ['field
                                                (match (syntax->datum variant-id)
-                                                 [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas)
+                                                 [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas 'gitxn)
                                                   #'transaction-field]
                                                  ['global #'global-field]
                                                  ['asset_holding_get #'asset-holding-field]

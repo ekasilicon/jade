@@ -379,11 +379,25 @@
            [6 (unit (AppExtraProgramPages))]
            [7 (unit (AppCreator))]
            [8 (unit (AppAddress))])])
-   (inc (unit)
+   (inc (unit >>=
+         read-uint8
+         read-transaction-field)
         [decode-instruction
          (match-lambda
+           [#x96 (unit (bsqrt))]
+           [#x97 (unit (divw))]
            [#xb6 (unit (itxn_next))]
-           [oc   ((super 'decode-instruction) oc)])])
+           [#xb7 (>>= read-uint8
+                      (λ (index)
+                        (>>= read-transaction-field
+                             (λ (field)
+                               (unit (gitxn index field))))))]
+           [oc   ((super 'decode-instruction) oc)])]
+        [decode-transaction-field
+         (match-lambda
+           [62 (unit (LastLog))]
+           [63 (unit (StateProofPK))]
+           [bc ((super 'decode-transaction-field) bc)])])
    read-byte-extras))
 
 (provide instruction-read/version)

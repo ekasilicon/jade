@@ -361,24 +361,67 @@
            (primitive-apply constant 0 n)])]))
 
 (define vm4
-  (inc ()
+  (inc (>>
+        primitive-apply
+        callsub retsub
+        swap !
+        b+ b- b/ b* b< b> b<= b>= b== b!= b% b\| b& b^ b~ bzero)
        [execute
         (sumtype-case-lambda i:Instruction4
           [(i:Instruction3 instr)
            ((super 'execute) instr)]
+          [(i:callsub offset)
+           (primitive-apply callsub 0 offset)]
+          [(i:retsub)
+           retsub]
+          [(i:b+)
+           (primitive-apply b+ 2)]
+          [(i:b-)
+           (primitive-apply b- 2)]
+          [(i:b/)
+           (primitive-apply b/ 2)]
+          [(i:b*)
+           (primitive-apply b* 2)]
+          [(i:b<)
+           (primitive-apply b< 2)]
+          [(i:b>)
+           (>> swap
+               (primitive-apply b< 2))]
+          [(i:b<=)
+           (>> swap
+               (primitive-apply b< 2)
+               (primitive-apply ! 1))]
+          [(i:b>=)
+           (>> (primitive-apply b< 2)
+               (primitive-apply ! 1))]
+          [(i:b==)
+           (primitive-apply b== 2)]
+          [(i:b!=)
+           (>> (primitive-apply b== 2)
+               (primitive-apply ! 1))]
+          [(i:b%)
+           (primitive-apply b% 2)]
+          [(i:b\|)
+           (primitive-apply b\| 2)]
+          [(i:b&)
+           (primitive-apply b& 2)]
+          [(i:b^)
+           (primitive-apply b^ 2)]
+          [(i:b~)
+           (primitive-apply b~ 1)]
+          [(i:bzero)
+           (primitive-apply bzero 1)]
           #:otherwise (λ (x) (error 'vm4 "implement ~a" x)))]))
 
 (define vm5
-  (inc (>>= >>
+  (inc (unit >>= >>
         in-mode
         pop push
         primitive-apply
         log
         extract
         extract-uint
-        itxn-begin
-        itxn-field
-        itxn-submit)
+        itxn-begin itxn-field itxn-submit itxn)
        [execute
         (sumtype-case-lambda i:Instruction5
           [(i:Instruction4 instr)
@@ -394,30 +437,51 @@
            (primitive-apply extract-uint 2 8)]
           [(i:itxn_begin)
            (>> (in-mode 'Application "itxn_begin")
-               (primitive-apply itxn-begin 0))]
+               itxn-begin)]
           [(i:itxn_field field)
            (>> (in-mode 'Application "itxn_field")
                (primitive-apply itxn-field 1 field))]
           [(i:itxn_submit)
            (>> (in-mode 'Application "itxn_submit")
-               (primitive-apply itxn-submit 0))]
+               itxn-submit)]
+          [(i:itxn field)
+           (>> (in-mode 'Application "itxn")
+               (primitive-apply itxn 0 field))]
+          [(i:uncover n)
+           (>>= (let loop ([n n])
+                  (>>= (pop)
+                       (λ (x)
+                         (if (zero? n)
+                           (unit x)
+                           (>>= (loop (sub1 n))
+                                (λ (y)
+                                  (>> (push x)
+                                      (unit y))))))))
+                push)]
           #:otherwise (λ (x) (error 'vm5 "implement ~a" x)))]))
 
 (define vm6
   (inc (>>
         in-mode
         primitive-apply
+        bsqrt
+        divw
         itxn-next
-        divw)
+        gitxn)
        [execute
         (sumtype-case-lambda i:Instruction6
           [(i:Instruction5 instr)
            ((super 'execute) instr)]
-          [(i:itxn_next)
-           (>> (in-mode 'Application "itxn_next")
-               (primitive-apply itxn-next 0))]
+          [(i:bsqrt)
+           (primitive-apply bsqrt 1)]
           [(i:divw)
            (primitive-apply divw 3)]
+          [(i:itxn_next)
+           (>> (in-mode 'Application "itxn_next")
+               itxn-next)]
+          [(i:gitxn index field)
+           (>> (in-mode 'Application "gitxn")
+               (primitive-apply gitxn 0 index field))]
           #:otherwise (λ (x) (error 'vm6 "implement ~a" x)))]))
 
 (define vm-extras

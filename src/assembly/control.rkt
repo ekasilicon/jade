@@ -5,8 +5,31 @@
          "../instruction/control.rkt"
          "../assembly.rkt")
 
-(define control-flow-graph
-  (match-lambda
+(define (assembly-control/version lsv)
+  (mix (inc ()
+            [offset-map
+             (λ (f instr)
+               (sumtype-case Pseudoinstruction instr
+                 [(varuint-immediate value)
+                  (varuint-immediate value)]
+                 [(bytes-immediate value)
+                  (bytes-immediate value)]
+                 [(instruction [instruction instr])
+                  (instruction [instruction ((super 'offset-map) f instr)])]))]
+            [has-inorder-successor?
+             (sumtype-case-lambda Pseudoinstruction
+               [(varuint-immediate)
+                #t]
+               [(bytes-immediate)
+                #t]
+               [(instruction [instruction instr])
+                ((super 'has-inorder-successor?) instr)])])
+       (instruction-control/version lsv)))
+
+(provide assembly-control/version)
+
+(define (control-flow-graph asm) 
+  (match asm
     [(assembly [logic-sig-version lsv] directives)
      (let* ([initial-ph (make-placeholder #f)]
             [phs (let loop ([directives directives]
@@ -27,25 +50,7 @@
                            (placeholder-set! ph (cons instr next-ph))
                            (loop directives next-ph phs))])]))])
        (define-values (offset-map has-inorder-successor?)
-         (let ([o (fix (mix (inc ()
-                                 [offset-map
-                                  (λ (f instr)
-                                    (sumtype-case Pseudoinstruction instr
-                                      [(varuint-immediate value)
-                                       (varuint-immediate value)]
-                                      [(bytes-immediate value)
-                                       (bytes-immediate value)]
-                                      [(instruction [instruction instr])
-                                       (instruction [instruction ((super 'offset-map) f instr)])]))]
-                                 [has-inorder-successor?
-                                  (sumtype-case-lambda Pseudoinstruction
-                                    [(varuint-immediate)
-                                     #t]
-                                    [(bytes-immediate)
-                                     #t]
-                                    [(instruction [instruction instr])
-                                     (instruction [instruction ((super 'has-inorder-successor?) instr)])])])
-                            (instruction-control/version lsv)))])
+         (let ([o (fix (assembly-control/version lsv))])
            (values (o 'offset-map)
                    (o 'has-inorder-successor?))))
        ; this loop does a pass to fix instructions whose successor

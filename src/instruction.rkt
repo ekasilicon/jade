@@ -309,8 +309,17 @@
          (sumtype-out AppParamsField5)
          (sumtype-out AssetParamsField5))
 
+(define-sumtype TransactionField6
+  TransactionField5
+  (LastLog)
+  (StateProofPK))
+
 (define-sumtype Instruction6
   Instruction5
-  (itxn_next))
+  (bsqrt)
+  (divw)
+  (itxn_next)
+  (gitxn index field))
 
-(provide (sumtype-out Instruction6))
+(provide (sumtype-out Instruction6)
+         (sumtype-out TransactionField6))
