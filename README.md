@@ -2,7 +2,8 @@
 
 jade is a static analysis platform and suite for TEAL programs.
 
-jade currently provides an initial analysis for TEALv3, the *Unconstrained Parameter Analysis*, which checks whether the program sensibly constrains the `OnCompletion` and `RekeyTo` transaction fields.
+jade currently provides the *Unconstrained Parameter Analysis*, which checks whether the program sensibly constrains the `OnCompletion` and `RekeyTo` transaction fields.
+jade has comprehensive support for TEALv3 and lower and near-comprehensive support for TEALv6 and lower.
 
 ## Installation
 
@@ -18,8 +19,8 @@ jade is designed to be self-documenting insofar as possible.
 Running jade without any arguments will print instructions.
 
 In brief, jade ingests
-TEALv3 program bytecode,
-TEALv3 program assembly, or
+TEALv6 program bytecode,
+TEALv6 program assembly, or
 a JSON package produced by the Algorand Indexer v2 (as implemented by [AlgoExplorer](https://algoexplorer.io), for example)
 and analyzes it.
 After analysis, jade prints a report which includes program disassembly and a result summary of the *Unconstrained Property Analysis*.
@@ -43,7 +44,5 @@ We are working to enhance jade in the following four ways:
 
 2. Introduce additional generic analyses to the suite---generic in the sense that they apply to programs generally and do not verify program-specific behaviors.
 
-3. Enhance the analyses to work on programs written in TEALv4 and TEALv5.
-
-4. Improve the analyzer API to make it easier to build on the platform.
+3. Improve the analyzer API to make it easier to build on the platform.
 
