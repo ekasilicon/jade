@@ -361,19 +361,41 @@
            (primitive-apply constant 0 n)])]))
 
 (define vm4
-  (inc (>>
+  (inc (>>= >>
+        in-mode
+        pop
         primitive-apply
+        gload
+        gaid
+        divmodw
         callsub retsub
+        usqrt
         swap !
         b+ b- b/ b* b< b> b<= b>= b== b!= b% b\| b& b^ b~ bzero)
        [execute
         (sumtype-case-lambda i:Instruction4
           [(i:Instruction3 instr)
            ((super 'execute) instr)]
+          [(i:gload group-index i)
+           (>> (in-mode 'Application "gload")
+               (primitive-apply gload 0 group-index i))]
+          [(i:gloads i)
+           (>> (in-mode 'Application "gloads")
+               (>>= (pop) (λ (group-index) (primitive-apply gload 0 group-index i))))]
+          [(i:gaid group-index)
+           (>> (in-mode 'Application "gaid")
+               (primitive-apply gaid 0 group-index))]
+          [(i:gaids)
+           (>> (in-mode 'Application "gaids")
+               (primitive-apply gaid 1))]
+          [(i:divmodw)
+           (primitive-apply divmodw 4)]
           [(i:callsub offset)
            (primitive-apply callsub 0 offset)]
           [(i:retsub)
            retsub]
+          [(i:sqrt)
+           (primitive-apply usqrt 1)]
           [(i:b+)
            (primitive-apply b+ 2)]
           [(i:b-)
@@ -421,6 +443,7 @@
         log
         extract
         extract-uint
+        app-params-get
         itxn-begin itxn-field itxn-submit itxn)
        [execute
         (sumtype-case-lambda i:Instruction5
@@ -435,6 +458,9 @@
            (primitive-apply extract 3)]
           [(i:extract_uint64)
            (primitive-apply extract-uint 2 8)]
+          [(i:app_params_get field)
+           (>> (in-mode 'Application "app_params_get")
+               (primitive-apply app-params-get 1 field))]
           [(i:itxn_begin)
            (>> (in-mode 'Application "itxn_begin")
                itxn-begin)]
