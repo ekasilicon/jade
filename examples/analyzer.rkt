@@ -324,7 +324,6 @@
     (foldl (λ (k ς) (hash-remove ς k)) ς ks))
   (let ([finals (time (analyze b64-encoded-bytecode))])
     (displayln (set-count finals))
-    #;
     (pretty-print
      (for/set ([ς (in-set finals)])
        (hash-remove* ς '(intcblock bytecblock mode stack scratchspace callstack pc))))))
