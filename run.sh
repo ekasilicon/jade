@@ -1,1 +1,1 @@
-docker run --rm -i jade $@
+docker run --rm -i jade "$@"
