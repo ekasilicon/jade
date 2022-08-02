@@ -66,14 +66,20 @@
                                                      ['end #'(self 'uint8-show)]
                                                      ['length #'(self 'uint8-show)]
                                                      ['bytes #'(self 'bytes-show)]
+                                                     ['s #'(self 'uint8-show)]
+                                                     ['encoding #'(self 'base64-encoding-show)]
+                                                     ['type #'(self 'json-ref-type-show)]
+                                                     ['standard #'(self 'vrf-verify-standard-show)]
                                                      ['field
                                                       (match (syntax->datum variant-id)
-                                                        [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas 'gitxn)
+                                                        [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'itxnas 'txnas 'gtxnas 'gtxnsas 'gitxn 'gitxna 'gitxnas)
                                                          #'(self 'transaction-field-show)]
                                                         ['global #'(self 'global-field-show)]
                                                         ['asset_holding_get #'(self 'asset-holding-field-show)]
                                                         ['asset_params_get #'(self 'asset-params-field-show)]
-                                                        ['app_params_get #'(self 'app-params-field-show)])])
+                                                        ['app_params_get #'(self 'app-params-field-show)]
+                                                        ['acct_params_get #'(self 'acct-params-field-show)]
+                                                        ['block #'(self 'block-field-show)])])
                                             fields)])
                   #'[(variant-id field-id ...)
                      (show-instruction variant-name (field-shower field-id) ...)])])]
@@ -134,7 +140,28 @@
          (enumtype-shower AppParamsField5 app-params-field-show)])
    (inc ()
         [instruction-show
-         (instruction-shower Instruction6)])
+         (instruction-shower Instruction6)]
+        [transaction-field-show
+         (enumtype-shower TransactionField6 transaction-field-show)]
+        [global-field-show
+         (enumtype-shower GlobalField6 global-field-show)]
+        [acct-params-field-show
+         (enumtype-shower AcctParamsField6 acct-params-field-show)])
+   (inc ()
+        [instruction-show
+         (instruction-shower Instruction7)]
+        [transaction-field-show
+         (enumtype-shower TransactionField7 transaction-field-show)]
+        [ecdsa-curve-show
+         (enumtype-shower ECDSACurve7 ecdsa-curve-show)]
+        [base64-encoding-show
+         (enumtype-shower Base64Encoding7 base64-encoding-show)]
+        [json-ref-type-show
+         (enumtype-shower JSONRefType7 json-ref-type-show)]
+        [vrf-verify-standard-show
+         (enumtype-shower VRFVerifyStandard7 vrf-verify-standard-show)]
+        [block-field-show
+         (enumtype-shower BlockField7 block-field-show)])
    (inc ())))
 
 (provide instruction-show/version)

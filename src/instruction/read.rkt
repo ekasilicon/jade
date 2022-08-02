@@ -135,7 +135,6 @@
            [0  (unit (Sender))]
            [1  (unit (Fee))]
            [2  (unit (FirstValid))]
-           [3  (unit (FirstValidTime))]
            [4  (unit (LastValid))]
            [5  (unit (Note))]
            [6  (unit (Lease))]
@@ -246,8 +245,7 @@
            [7  (unit (AssetManager))]
            [8  (unit (AssetReserve))]
            [9  (unit (AssetFreeze))]
-           [10 (unit (AssetClawback))]
-           [11 (unit (AssetCreator))])])
+           [10 (unit (AssetClawback))])])
    (inc (read-transaction-field read-global-field
          read-uint8 read-offset read-bytes read-varuint
          unit >>=)
@@ -378,26 +376,107 @@
            [5 (unit (AppLocalNumByteSlice))]
            [6 (unit (AppExtraProgramPages))]
            [7 (unit (AppCreator))]
-           [8 (unit (AppAddress))])])
+           [8 (unit (AppAddress))])]
+        [decode-asset-params-field
+         (match-lambda
+           [11 (unit (AssetCreator))]
+           [bc ((super 'decode-asset-params-field) bc)])])
    (inc (unit >>=
          read-uint8
          read-transaction-field)
         [decode-instruction
          (match-lambda
+           [#x73 (>>= read-acct-params-field (λ (field) (unit (acct_params_get field))))]
            [#x96 (unit (bsqrt))]
            [#x97 (unit (divw))]
            [#xb6 (unit (itxn_next))]
            [#xb7 (>>= read-uint8
-                      (λ (index)
+                      (λ (group-index)
                         (>>= read-transaction-field
                              (λ (field)
-                               (unit (gitxn index field))))))]
+                               (unit (gitxn group-index field))))))]
+           [#xb8 (>>= read-uint8
+                      (λ (group-index)
+                        (>>= read-transaction-field
+                             (λ (field)
+                               (>>= read-uint8
+                                    (λ (array-index)
+                                      (unit (gitxna group-index field array-index))))))))]
+           [#xc4 (unit (gloadss))]
+           [#xc5 (>>= read-transaction-field (λ (field) (unit (itxnas field))))]
+           [#xc6 (>>= read-uint8
+                      (λ (group-index)
+                        (>>= read-transaction-field
+                             (λ (field)
+                               (unit (gitxnas group-index field))))))]
            [oc   ((super 'decode-instruction) oc)])]
+        [read-acct-params-field
+         (>>= read-uint8 decode-acct-params-field)]
+        [decode-acct-params-field
+         (match-lambda
+           [0 (unit (AcctBalance))]
+           [1 (unit (AcctMinBalance))]
+           [2 (unit (AcctAuthAddr))])]
         [decode-transaction-field
          (match-lambda
            [62 (unit (LastLog))]
            [63 (unit (StateProofPK))]
-           [bc ((super 'decode-transaction-field) bc)])])
+           [bc ((super 'decode-transaction-field) bc)])]
+        [decode-global-field
+         (match-lambda
+           [12 (unit (OpcodeBudget))]
+           [13 (unit (CallerApplicationID))]
+           [14 (unit (CallerApplicationAddress))]
+           [bc ((super 'decode-global-field) bc)])])
+   (inc (unit >>=
+         read-uint8)
+        [decode-instruction
+         (match-lambda
+           [#x5c (>>= read-uint8 (λ (s) (unit (replace2 s))))]
+           [#x5d (unit (replace3))]
+           [#x5e (>>= read-base64-encoding (λ (encoding) (unit (base64_decode encoding))))]
+           [#x5e (>>= read-json-ref-type (λ (type) (unit (json_ref type))))]
+           [#x84 (unit (ed25519verify_bare))]
+           [#x98 (unit (sha3_256))]
+           [#xd0 (>>= read-vrf-verify-standard (λ (standard) (unit (vrf_verify standard))))]
+           [#xd1 (>>= read-block-field (λ (field) (unit (block field))))]
+           [oc   ((super 'decode-instruction) oc)])]
+        [decode-ecdsa-curve
+         (match-lambda
+           [1 (unit (Secp256r1))]
+           [i ((super 'decode-ecdsa-curve) i)])]
+        [decode-transaction-field
+         (match-lambda
+           [3  (unit (FirstValidTime))]
+           [64 (unit (ApprovalProgramPages))]
+           [65 (unit (NumApprovalProgramPages))]
+           [66 (unit (ClearStateProgramPages))]
+           [67 (unit (NumClearStateProgramPages))]
+           [i  ((super 'decode-transaction-field) i)])]
+        [read-base64-encoding
+         (>>= read-uint8 decode-base64-encoding)]
+        [decode-base64-encoding
+         (match-lambda
+           [0 (unit (URLEncoding))]
+           [1 (unit (StdEncoding))])]
+        [read-json-ref-type
+         (>>= read-uint8 decode-json-ref-type)]
+        [decode-json-ref-type
+         (match-lambda
+           [0 (unit (JSONString))]
+           [1 (unit (JSONUint64))]
+           [2 (unit (JSONObject))])]
+        [read-vrf-verify-standard
+         (>>= read-uint8 decode-vrf-verify-standard)]
+        [decode-vrf-verify-standard
+         (match-lambda
+           [0 (unit (VrfAlgorand))])]
+        [read-block-field
+         (>>= read-uint8 decode-block-field)]
+        [decode-block-field
+         (match-lambda
+           [0 (unit (BlkSeed))]
+           [1 (unit (BlkTimestamp))])])
    read-byte-extras))
 
 (provide instruction-read/version)
@@ -406,7 +485,7 @@
   (require (only-in racket/match match-let)
            "../read-byte.rkt")
   
-  (((fix (mix (instruction-read/version 5)
+  (((fix (mix (instruction-read/version 7)
               (inc ()
                    [unit (λ xs (λ (σ) (cons xs σ)))]
                    [>>= (λ (m f)
@@ -414,9 +493,9 @@
                             (match-let ([(cons xs σ) (m σ)])
                               ((apply f xs) σ))))])
               (inc (unit)
-                   [logic-sig-version (unit 5)])
+                   [logic-sig-version (unit 7)])
               read-byte-extras
               (inc (unit)
-                   [read-byte (unit 3)])))
+                   [read-byte (unit #x5d)])))
     'read-instruction)
    42))

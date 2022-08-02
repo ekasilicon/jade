@@ -6,7 +6,6 @@
   (Sender)
   (Fee)
   (FirstValid)
-  (FirstValidTime)
   (LastValid)
   (Note)
   (Lease)
@@ -262,6 +261,9 @@
   (CurrentApplicationAddress)
   (GroupID))
 
+(define-sumtype ECDSACurve5
+  (Secp256k1))
+
 (define-sumtype AppParamsField5
   (AppApprovalProgram)
   (AppClearStateProgram)
@@ -306,6 +308,7 @@
 (provide (sumtype-out Instruction5)
          (sumtype-out TransactionField5)
          (sumtype-out GlobalField5)
+         (sumtype-out ECDSACurve5)
          (sumtype-out AppParamsField5)
          (sumtype-out AssetParamsField5))
 
@@ -314,12 +317,79 @@
   (LastLog)
   (StateProofPK))
 
+(define-sumtype GlobalField6
+  GlobalField5
+  (OpcodeBudget)
+  (CallerApplicationID)
+  (CallerApplicationAddress))
+
+(define-sumtype AcctParamsField6
+  (AcctBalance)
+  (AcctMinBalance)
+  (AcctAuthAddr))
+
 (define-sumtype Instruction6
   Instruction5
+  (acct_params_get field)
   (bsqrt)
   (divw)
   (itxn_next)
-  (gitxn index field))
+  (gitxn group-index field)
+  (gitxna group-index field array-index)
+  (gloadss)
+  (itxnas field)
+  (gitxnas group-index field))
 
 (provide (sumtype-out Instruction6)
-         (sumtype-out TransactionField6))
+         (sumtype-out TransactionField6)
+         (sumtype-out GlobalField6)
+         (sumtype-out AcctParamsField6))
+
+(define-sumtype TransactionField7
+  TransactionField6
+  (FirstValidTime)
+  (ApprovalProgramPages)
+  (NumApprovalProgramPages)
+  (ClearStateProgramPages)
+  (NumClearStateProgramPages))
+
+(define-sumtype ECDSACurve7
+  ECDSACurve5
+  (Secp256r1))
+
+(define-sumtype Base64Encoding7
+  (URLEncoding)
+  (StdEncoding))
+
+(define-sumtype JSONRefType7
+  (JSONString)
+  (JSONUint64)
+  (JSONObject))
+
+(define-sumtype VRFVerifyStandard7
+  (VrfAlgorand))
+
+(define-sumtype BlockField7
+  (BlkSeed)
+  (BlkTimestamp))
+
+(define-sumtype Instruction7
+  Instruction6
+  (replace2 s)
+  (replace3)
+  (base64_decode encoding)
+  (json_ref type)
+  (ed25519verify_bare)
+  (sha3_256)
+  (vrf_verify standard)
+  (block field))
+
+(provide (sumtype-out Instruction7)
+         (sumtype-out TransactionField7)
+         (sumtype-out ECDSACurve7)
+         (sumtype-out Base64Encoding7)
+         (sumtype-out JSONRefType7)
+         (sumtype-out VRFVerifyStandard7)
+         (sumtype-out BlockField7))
+
+

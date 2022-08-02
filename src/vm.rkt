@@ -29,23 +29,7 @@
             check-final)]
        [check-version!
         (λ (instr)
-          (logic-sig-version>= (instruction-version instr) (instruction-name instr)))]
-       #;
-       [lookup-intcblock
-        (λ (i)
-          (>>= get-intcblock
-           (λ (xs)
-             (if (< i (length xs))
-               (constant (list-ref xs i))
-               (panic "intcblock has ~a ints but index ~a requested" (length xs) i)))))]
-       #;
-       [lookup-bytecblock
-        (λ (i)
-          (>>= get-bytecblock
-               (λ (bss)
-                 (if (< i (length bss))
-                   (constant (list-ref bss i))
-                   (panic "bytecblock has ~a bytes but index ~a requested" (length bss) i)))))]))
+          (logic-sig-version>= (instruction-version instr) (instruction-name instr)))]))
 
 (define vm1
   (inc (group-transaction
@@ -63,8 +47,6 @@
         btoi itob len
         ! \|\| &&
         primitive-apply
-        ;get-bytecode
-        ;get-pc set-pc
         jump
         logic-sig-version
         panic
@@ -505,10 +487,20 @@
           [(i:itxn_next)
            (>> (in-mode 'Application "itxn_next")
                itxn-next)]
-          [(i:gitxn index field)
+          [(i:gitxn group-index field)
            (>> (in-mode 'Application "gitxn")
-               (primitive-apply gitxn 0 index field))]
+               (primitive-apply gitxn 0 group-index field))]
           #:otherwise (λ (x) (error 'vm6 "implement ~a" x)))]))
+
+(define vm7
+  (inc (>>
+        in-mode
+        primitive-apply)
+       [execute
+        (sumtype-case-lambda i:Instruction7
+          [(i:Instruction6 instr)
+           ((super 'execute) instr)]
+          #:otherwise (λ (x) (error 'vm7 "implement ~a" x)))]))
 
 (define vm-extras
   (inc (pop
@@ -550,7 +542,7 @@
 (require "version.rkt")
 
 (define vm/version
-  (make-*/version 'vm/version vm0 vm1 vm2 vm3 vm4 vm5 vm6 vm-extras))
+  (make-*/version 'vm/version vm0 vm1 vm2 vm3 vm4 vm5 vm6 vm7 vm-extras))
 
 (provide vm/version
          vm-pseudo)

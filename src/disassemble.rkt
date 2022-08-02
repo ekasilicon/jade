@@ -141,7 +141,7 @@
 
 (define (instruction-map lsv bytecode)
   (if (and (exact-nonnegative-integer? lsv)
-           (memv lsv '(1 2 3 4 5 6)))
+           (memv lsv '(1 2 3 4 5 6 7)))
     (let ([disassemble (fix (mix (instruction-read/version lsv)
                                  (inc (unit)
                                       [logic-sig-version
@@ -153,7 +153,7 @@
          σ]
         [(failure message)
          (error 'disassemble-failure message)]))
-    (error 'disassemble-bad-header "expected TEAL version 1, 2, 3, 4, 5, or 6 but got ~a" lsv)))
+    (error 'disassemble-bad-header "expected TEAL version 1, 2, 3, 4, 5, 6, or 7 but got ~a" lsv)))
 
 (provide jump-destinations
          instruction-map)

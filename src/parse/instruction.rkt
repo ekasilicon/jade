@@ -86,7 +86,13 @@
       global-field:id
       asset-params-field:id
       asset-holding-field:id
-      app-params-field:id)
+      app-params-field:id
+      acct-params-field:id
+      ecdsa-curve-field:id
+      base64-encoding-field:id
+      json-ref-type-field:id
+      vrf-verify-standard-field:id
+      block-field:id)
      (define (parser variant-id)
        (cond
          [(syntax-local-value variant-id (λ () #f))
@@ -101,6 +107,7 @@
                                               ['v #'guarded-uint8]
                                               ['i #'guarded-uint8]
                                               ['n #'guarded-uint8]
+                                              ['s #'guarded-uint8]
                                               ['uints #'(p* (>> whitespace* varuint))]
                                               ['bytess #'(p* (>> whitespace* bytes))]
                                               ['index #'guarded-uint8]
@@ -112,14 +119,19 @@
                                               ['length #'guarded-uint8]
                                               ['bytes #'guarded-bytes]
                                               ['uint #'guarded-varuint]
+                                              ['encoding #'base64-encoding-field]
+                                              ['type #'json-ref-type-field]
+                                              ['standard #'vrf-verify-standard-field]
                                               ['field
                                                (match (syntax->datum variant-id)
-                                                 [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'txnas 'gtxnas 'gtxnsas 'gitxn)
+                                                 [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'itxnas 'txnas 'gtxnas 'gtxnsas 'gitxn 'gitxna 'gitxnas)
                                                   #'transaction-field]
                                                  ['global #'global-field]
                                                  ['asset_holding_get #'asset-holding-field]
                                                  ['asset_params_get #'asset-params-field]
-                                                 ['app_params_get #'app-params-field])])
+                                                 ['app_params_get #'app-params-field]
+                                                 ['acct_params_get #'acct-params-field]
+                                                 ['block #'block-field])])
                                             fields)])
                   #'(make-instruction-parser name constructor field ...))])]
          [else
@@ -138,7 +150,13 @@
         (~optional (~seq #:global-field global-field-type:id))
         (~optional (~seq #:asset-params-field asset-params-field-type:id))
         (~optional (~seq #:asset-holding-field asset-holding-field-type:id))
-        (~optional (~seq #:app-params-field app-params-field-type:id)))
+        (~optional (~seq #:app-params-field app-params-field-type:id))
+        (~optional (~seq #:acct-params-field acct-params-field-type:id))
+        (~optional (~seq #:ecdsa-curve-field ecdsa-curve-field-type:id))
+        (~optional (~seq #:base64-encoding-field base64-encoding-field-type:id))
+        (~optional (~seq #:json-ref-type-field json-ref-type-field-type:id))
+        (~optional (~seq #:vrf-verify-standard-field vrf-verify-standard-field-type:id))
+        (~optional (~seq #:block-field block-field-type:id)))
      (with-syntax ([(method ...)
                     (append (if (attribute transaction-field-type)
                               (enumtype-methods #'transaction-field
@@ -164,19 +182,61 @@
                               (enumtype-methods #'app-params-field
                                                 #'app-params-field-raw
                                                 #'app-params-field-type)
+                              (list))
+                            (if (attribute acct-params-field-type)
+                              (enumtype-methods #'acct-params-field
+                                                #'acct-params-field-raw
+                                                #'acct-params-field-type)
+                              (list))
+                            (if (attribute ecdsa-curve-field-type)
+                              (enumtype-methods #'ecdsa-curve-field
+                                                #'ecdsa-curve-field-raw
+                                                #'ecdsa-curve-field-type)
+                              (list))
+                            (if (attribute base64-encoding-field-type)
+                              (enumtype-methods #'base64-encoding-field
+                                                #'base64-encoding-field-raw
+                                                #'base64-encoding-field-type)
+                              (list))
+                            (if (attribute json-ref-type-field-type)
+                              (enumtype-methods #'json-ref-type-field
+                                                #'json-ref-type-field-raw
+                                                #'json-ref-type-field-type)
+                              (list))
+                            (if (attribute vrf-verify-standard-field-type)
+                              (enumtype-methods #'vrf-verify-standard-field
+                                                #'vrf-verify-standard-field-raw
+                                                #'vrf-verify-standard-field-type)
+                              (list))
+                            (if (attribute block-field-type)
+                              (enumtype-methods #'block-field
+                                                #'block-field-raw
+                                                #'block-field-type)
                               (list)))])
        #'(inc (transaction-field
                global-field
                asset-params-field
                asset-holding-field
-               app-params-field)
+               app-params-field
+               acct-params-field
+               ecdsa-curve-field
+               base64-encoding-field
+               json-ref-type-field
+               vrf-verify-standard-field
+               block-field)
               [instruction
                (instruction-parser instruction-type
                                    transaction-field
                                    global-field
                                    asset-params-field
                                    asset-holding-field
-                                   app-params-field)]
+                                   app-params-field
+                                   acct-params-field
+                                   ecdsa-curve-field
+                                   base64-encoding-field
+                                   json-ref-type-field
+                                   vrf-verify-standard-field
+                                   block-field)]
               method ...))]))
 
 
@@ -211,7 +271,17 @@
            #:asset-params-field AssetParamsField5
            #:app-params-field AppParamsField5)
           (instruction-mixin
-           Instruction6)
+           Instruction6
+           #:transaction-field TransactionField6
+           #:global-field GlobalField6
+           #:acct-params-field AcctParamsField6)
+          (instruction-mixin
+           Instruction7
+           #:ecdsa-curve-field ECDSACurve7
+           #:base64-encoding-field Base64Encoding7
+           #:json-ref-type-field JSONRefType7
+           #:vrf-verify-standard-field VRFVerifyStandard7
+           #:block-field BlockField7)
           (inc ()))])
     (λ (lsv) ((fix (parser-object/version lsv)) 'instruction))))
 
@@ -240,4 +310,12 @@
 
   (parse-success (instruction-parser/version 3)
                  "gtxnsa Fee 12"
-                 (gtxnsa [field (Fee)] [array-index 12])))
+                 (gtxnsa [field (Fee)] [array-index 12]))
+
+  (parse-success (instruction-parser/version 7)
+                 "base64_decode URLEncoding"
+                 (base64_decode [encoding (URLEncoding)]))
+
+  (parse-success (instruction-parser/version 7)
+                 "json_ref JSONString"
+                 (json_ref [type (JSONString)])))
