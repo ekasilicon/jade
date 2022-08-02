@@ -7,13 +7,10 @@
          "../assembly.rkt"
          "../instruction/show.rkt")
 
-(define varuint-show number->string)
-(define (bytes-show bs) (bytes->string/utf-8 (base64-encode bs #"")))
-
 (define assembly-show
   (match-lambda
     [(assembly [logic-sig-version lsv] directives)
-     (define-values (instruction-show label-show)
+     (define-values (instruction-show label-show uint-show bytes-show)
        (let ([show (fix (mix (instruction-show/version lsv)
                              (inc ()
                                   [label-show
@@ -29,7 +26,9 @@
                                   [bytess-show
                                    (λ (bss) (string-join (map (self 'bytes-show) bss) " "))])))])
          (values (show 'instruction-show)
-                 (show 'label-show))))
+                 (show 'label-show)
+                 (show 'uint-show)
+                 (show 'bytes-show))))
      (define directive-show
        (sumtype-case-lambda Directive
          [(pragma content)
@@ -43,7 +42,7 @@
              [(instruction [instruction instr])
               (instruction-show instr)]
              [(varuint-immediate value)
-              (string-append "int " (varuint-show value))]
+              (string-append "int " (uint-show value))]
              [(bytes-immediate value)
               (string-append "bytes " (bytes-show value))]))]))
      (string-append

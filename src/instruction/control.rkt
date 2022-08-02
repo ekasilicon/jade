@@ -118,6 +118,23 @@
            [(Instruction5 instr)
             ((super 'has-inorder-successor?) instr)]
            #:otherwise (λ (_) #t))])
+   (inc ()
+        [offset
+         (sumtype-case-lambda Instruction7
+           [(Instruction6 instr)
+            ((super 'offset) instr)]
+           #:otherwise (λ (_) #f))]
+        [offset-map
+         (λ (f instr)
+           (sumtype-case Instruction7 instr
+             [(Instruction6 instr)
+              ((super 'offset-map) f instr)]
+             #:otherwise values))]
+        [has-inorder-successor?
+         (sumtype-case-lambda Instruction7
+           [(Instruction6 instr)
+            ((super 'has-inorder-successor?) instr)]
+           #:otherwise (λ (_) #t))])
    (inc ())))
 
 (provide instruction-control/version)

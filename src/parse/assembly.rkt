@@ -119,6 +119,10 @@
 
   (let ([input (port->string (current-input-port))])
     (displayln input)
-    (let ([asm (time (parse input))])
-      (displayln (assembly-show asm))
-      (pretty-print (control-flow-graph asm)))))
+    (match (time (parse input))
+      [(error-result tag message)
+       (displayln tag)
+       (displayln message)]
+      [asm
+       (displayln (assembly-show asm))
+       (pretty-print (control-flow-graph asm))])))
