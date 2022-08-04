@@ -150,29 +150,30 @@
            (>>= (lookup-bytecblock 3) push)]
           [(i:arg n)
            (>> (in-mode 'Signature "arg")
-               (primitive-apply arg 0 n))]
+               (>>= (arg n) push))]
           [(i:arg_0)
            (>> (in-mode 'Signature "arg_0")
+               (>>= (arg 0) push)
                (primitive-apply arg 0 0))]
           [(i:arg_1)
            (>> (in-mode 'Signature "arg_1")
-               (primitive-apply arg 0 1))]
+               (>>= (arg 1) push))]
           [(i:arg_2)
            (>> (in-mode 'Signature "arg_2")
-               (primitive-apply arg 0 2))]
+               (>>= (arg 2) push))]
           [(i:arg_3)
            (>> (in-mode 'Signature "arg_3")
-               (primitive-apply arg 0 3))]
-          [(i:txn [field f])
-           (primitive-apply transaction 0 f)]
-          [(i:global [field f])
-           (primitive-apply global 0 f)]
-          [(i:gtxn [group-index gi] [field f])
-           (primitive-apply group-transaction 0 gi f)]
+               (>>= (arg 3) push))]
+          [(i:txn field)
+           (>>= (transaction field) push)]
+          [(i:global field)
+           (>>= (global field) push)]
+          [(i:gtxn group-index field)
+           (>>= (group-transaction group-index field) push)]
           [(i:load i)
-           (primitive-apply load 0 i)]
+           (>>= (load i) push)]
           [(i:store i)
-           (primitive-apply store 1 i)]
+           (>>= (>>= (pop) (λ (x) (store i x))) push)]
           [(i:bnz offset)
            (>>= (>>= (pop) is-zero)
                 (λ (stay?) (if stay? continue (jump offset))))]
@@ -212,10 +213,10 @@
            ((super 'execute) instr)]          
           [(i:addw)
            (primitive-apply addw 2)]
-          [(i:txna [field f] [array-index ai])
-           (primitive-apply transaction-array 0 f ai)]
-          [(i:gtxna [group-index gi] [field f] [array-index ai])
-           (primitive-apply group-transaction-array 0 gi f ai)]
+          [(i:txna field array-index)
+           (>>= (transaction-array field array-index) push)]
+          [(i:gtxna group-index field array-index)
+           (>>= (group-transaction-array group-index field array-index) push)]
           [(i:bz offset)
            (>>= (>>= (pop) is-zero)
                 (λ (jump?) (if jump? (jump offset) continue)))]
@@ -353,7 +354,8 @@
         callsub retsub
         usqrt
         swap !
-        b+ b- b/ b* b< b> b<= b>= b== b!= b% b\| b& b^ b~ bzero)
+        b+ b- b/ b* b< b> b<= b>= b== b!= b% b\| b& b^ b~ bzero
+        shl shr bitlen exp expw)
        [execute
         (sumtype-case-lambda i:Instruction4
           [(i:Instruction3 instr)
@@ -415,7 +417,16 @@
            (primitive-apply b~ 1)]
           [(i:bzero)
            (primitive-apply bzero 1)]
-          #:otherwise (λ (x) (error 'vm4 "implement ~a" x)))]))
+          [(i:shl)
+           (primitive-apply shl 2)]
+          [(i:shr)
+           (primitive-apply shr 2)]
+          [(i:bitlen)
+           (primitive-apply bitlen 1)]
+          [(i:exp)
+           (primitive-apply exp 2)]
+          [(i:expw)
+           (primitive-apply expw 2)])]))
 
 (define vm5
   (inc (unit >>= >>
@@ -423,10 +434,14 @@
         pop push
         primitive-apply
         log
+        ecdsa-verify ecdsa-pk-decompress ecdsa-pk-recover
+        load store
         extract
         extract-uint
         app-params-get
-        itxn-begin itxn-field itxn-submit itxn)
+        transaction-array group-transaction-array
+        inner-transaction-begin inner-transaction-field inner-transaction-submit inner-transaction inner-transaction-array
+        arg)
        [execute
         (sumtype-case-lambda i:Instruction5
           [(i:Instruction4 instr)
@@ -434,48 +449,85 @@
           [(i:log)
            (>> (in-mode 'Application "log")
                (primitive-apply log 1))]
+          [(i:loads)
+           (primitive-apply load 1)]
+          [(i:stores)
+           (primitive-apply store 2)]
           [(i:extract start length)
            (>>= (>>= (pop) (λ (bs) (extract bs start length))) push)]
           [(i:extract3)
            (primitive-apply extract 3)]
+          [(i:extract_uint16)
+           (primitive-apply extract-uint 2 2)]
+          [(i:extract_uint32)
+           (primitive-apply extract-uint 2 4)]
           [(i:extract_uint64)
            (primitive-apply extract-uint 2 8)]
           [(i:app_params_get field)
            (>> (in-mode 'Application "app_params_get")
                (primitive-apply app-params-get 1 field))]
+          [(i:ecdsa_verify v)
+           (primitive-apply ecdsa-verify 5 v)]
+          [(i:ecdsa_pk_decompress v)
+           (primitive-apply ecdsa-pk-decompress 1 v)]
+          [(i:ecdsa_pk_recover v)
+           (primitive-apply ecdsa-pk-recover 4 v)]
           [(i:itxn_begin)
            (>> (in-mode 'Application "itxn_begin")
-               itxn-begin)]
-          [(i:itxn_field field)
+               inner-transaction-begin)]
+          [(i:itxn_field [field f])
            (>> (in-mode 'Application "itxn_field")
-               (primitive-apply itxn-field 1 field))]
+               (>>= (>>= (pop) (λ (v) (inner-transaction-field f v))) push))]
           [(i:itxn_submit)
            (>> (in-mode 'Application "itxn_submit")
-               itxn-submit)]
+               inner-transaction-submit)]
           [(i:itxn field)
            (>> (in-mode 'Application "itxn")
-               (primitive-apply itxn 0 field))]
+               (>>= (inner-transaction field) push))]
+          [(i:itxna [field f] [array-index ai])
+           (>> (in-mode 'Application "itxna")
+               (>>= (inner-transaction-array f ai) push))]
+          [(i:txnas [field f])
+           (>>= (>>= (pop) (λ (ai) (transaction-array f ai))) push)]
+          [(i:gtxnas [group-index gi] [field f])
+           (>>= (>>= (pop) (λ (ai) (group-transaction-array gi f ai))) push)]
+          [(i:gtxnsas [field f])
+           (>>= (>>= (pop 2) (λ (gi ai) (group-transaction-array gi f ai))) push)]
+          [(i:args)
+           (>> (in-mode 'Signature "args")
+               (>>= (>>= (pop) arg) push))]
+          [(i:cover n)
+           (>>= (pop)
+                (λ (x)
+                  (let loop ([n n])
+                    (if (zero? n)
+                      (push x)
+                      (>>= (pop)
+                           (λ (y)
+                             (>> (loop (sub1 n))
+                                 (push y))))))))]
           [(i:uncover n)
            (>>= (let loop ([n n])
-                  (>>= (pop)
-                       (λ (x)
-                         (if (zero? n)
-                           (unit x)
+                  (if (zero? n)
+                    (pop)
+                    (>>= (pop)
+                         (λ (y)
                            (>>= (loop (sub1 n))
-                                (λ (y)
-                                  (>> (push x)
-                                      (unit y))))))))
-                push)]
-          #:otherwise (λ (x) (error 'vm5 "implement ~a" x)))]))
+                                (λ (x)
+                                  (>> (push y)
+                                      (unit x))))))))
+                push)])]))
 
 (define vm6
-  (inc (>>
+  (inc (>> >>=
+        push pop
         in-mode
         primitive-apply
         bsqrt
         divw
-        itxn-next
-        gitxn)
+        inner-transaction-next group-inner-transaction group-inner-transaction-array inner-transaction-array
+        gload
+        acct-params-get)
        [execute
         (sumtype-case-lambda i:Instruction6
           [(i:Instruction5 instr)
@@ -486,21 +538,49 @@
            (primitive-apply divw 3)]
           [(i:itxn_next)
            (>> (in-mode 'Application "itxn_next")
-               itxn-next)]
-          [(i:gitxn group-index field)
+               inner-transaction-next)]
+          [(i:gitxn [group-index gi] [field f])
            (>> (in-mode 'Application "gitxn")
-               (primitive-apply gitxn 0 group-index field))]
-          #:otherwise (λ (x) (error 'vm6 "implement ~a" x)))]))
+               (>>= (group-inner-transaction gi f) push))]
+          [(i:gitxna [group-index gi] [field f] [array-index ai])
+           (>> (in-mode 'Application "gitxna")
+               (>>= (group-inner-transaction-array gi f ai) push))]
+          [(i:itxnas [field f])
+           (>>= (>>= (pop) (λ (ai) (inner-transaction-array f ai))) push)]
+          [(i:gitxnas [group-index gi] [field f])
+           (>>= (>>= (pop) (λ (ai) (group-inner-transaction-array gi f ai))) push)]
+          [(i:gloadss)
+           (>> (in-mode 'Application "gloadss")
+               (primitive-apply gload 2))]
+          [(i:acct_params_get field)
+           (>> (in-mode 'Application "acct_params_get")
+               (primitive-apply acct-params-get 1 field))])]))
 
 (define vm7
-  (inc (>>
+  (inc (>>= >> pop push
         in-mode
-        primitive-apply)
+        primitive-apply
+        replace base64-decode json-ref ed25519verify-bare sha3-256 vrf-verify block)
        [execute
         (sumtype-case-lambda i:Instruction7
           [(i:Instruction6 instr)
            ((super 'execute) instr)]
-          #:otherwise (λ (x) (error 'vm7 "implement ~a" x)))]))
+          [(i:replace2 s)
+           (>>= (>>= (pop 2) (λ (A B) (replace A s B))) push)]
+          [(i:replace3)
+           (primitive-apply replace 3)]
+          [(i:base64_decode encoding)
+           (primitive-apply base64-decode 1 encoding)]
+          [(i:json_ref type)
+           (primitive-apply json-ref 2 type)]
+          [(i:ed25519verify_bare)
+           (primitive-apply ed25519verify-bare 3)]
+          [(i:sha3_256)
+           (primitive-apply sha3-256 1)]
+          [(i:vrf_verify standard)
+           (primitive-apply vrf-verify 3 standard)]
+          [(i:block field)
+           (primitive-apply block 1 field)])]))
 
 (define vm-extras
   (inc (pop
