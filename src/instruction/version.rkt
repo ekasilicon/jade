@@ -43,6 +43,18 @@
            [(Instruction5 instr) 
             ((super 'instruction-version) instr)]
            #:otherwise (λ (_) 6))])
+   (inc ()
+        [instruction-version
+         (sumtype-case-lambda Instruction7
+           [(Instruction5 instr) 
+            ((super 'instruction-version) instr)]
+           #:otherwise (λ (_) 7))])
+   (inc ()
+        [instruction-version
+         (sumtype-case-lambda Instruction8
+           [(Instruction5 instr) 
+            ((super 'instruction-version) instr)]
+           #:otherwise (λ (_) 8))])
    (inc ())))
 
 (provide instruction-version/version)

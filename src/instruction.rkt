@@ -392,4 +392,8 @@
          (sumtype-out VRFVerifyStandard7)
          (sumtype-out BlockField7))
 
+(define-sumtype Instruction8
+  Instruction7
+  (switch offsets))
 
+(provide (sumtype-out Instruction8))

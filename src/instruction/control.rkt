@@ -11,9 +11,9 @@
    'instruction-control/version
    (inc ())
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction1
-           [(bnz offset) offset]
+           [(bnz offset) (list offset)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -25,12 +25,12 @@
            [(err) #f]
            #:otherwise (λ (_) #t))])
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction2
            [(Instruction1 instr)
-            ((super 'offset) instr)]
-           [(b offset) offset]
-           [(bz offset) offset]
+            ((super 'offsets) instr)]
+           [(b offset) (list offset)]
+           [(bz offset) (list offset)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -48,10 +48,10 @@
            [(b) #f]
            #:otherwise (λ (_) #t))])
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction3
            [(Instruction2 instr)
-            ((super 'offset) instr)]
+            ((super 'offsets) instr)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -65,11 +65,11 @@
             ((super 'has-inorder-successor?) instr)]
            #:otherwise (λ (_) #t))])
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction4
            [(Instruction3 instr)
-            ((super 'offset) instr)]
-           [(callsub offset) offset]
+            ((super 'offsets) instr)]
+           [(callsub offset) (list offset)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -85,10 +85,10 @@
            [(retsub) #f]
            #:otherwise (λ (_) #t))])
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction5
            [(Instruction4 instr)
-            ((super 'offset) instr)]
+            ((super 'offsets) instr)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -102,10 +102,10 @@
             ((super 'has-inorder-successor?) instr)]
            #:otherwise (λ (_) #t))])
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction6
            [(Instruction5 instr)
-            ((super 'offset) instr)]
+            ((super 'offsets) instr)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -119,10 +119,10 @@
             ((super 'has-inorder-successor?) instr)]
            #:otherwise (λ (_) #t))])
    (inc ()
-        [offset
+        [offsets
          (sumtype-case-lambda Instruction7
            [(Instruction6 instr)
-            ((super 'offset) instr)]
+            ((super 'offsets) instr)]
            #:otherwise (λ (_) #f))]
         [offset-map
          (λ (f instr)
@@ -134,6 +134,26 @@
          (sumtype-case-lambda Instruction7
            [(Instruction6 instr)
             ((super 'has-inorder-successor?) instr)]
+           #:otherwise (λ (_) #t))])
+   (inc ()
+        [offsets
+         (sumtype-case-lambda Instruction8
+           [(Instruction7 instr)
+            ((super 'offsets) instr)]
+           [(switch offsets) offsets]
+           #:otherwise (λ (_) #f))]
+        [offset-map
+         (λ (f instr)
+           (sumtype-case Instruction8 instr
+             [(Instruction7 instr)
+              ((super 'offset-map) f instr)]
+             [(switch offsets) (switch [offsets (map f offsets)])]
+             #:otherwise values))]
+        [has-inorder-successor?
+         (sumtype-case-lambda Instruction8
+           [(Instruction7 instr)
+            ((super 'has-inorder-successor?) instr)]
+           [(switch) #t]
            #:otherwise (λ (_) #t))])
    (inc ())))
 

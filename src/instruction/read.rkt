@@ -477,6 +477,22 @@
          (match-lambda
            [0 (unit (BlkSeed))]
            [1 (unit (BlkTimestamp))])])
+   (inc (unit >>=
+         read-uint8 read-int16)
+        [decode-instruction
+         (match-lambda
+           [#x8a (>>= (>>= read-uint8
+                         (λ (n)
+                           (let loop ([n n])
+                             (if (zero? n)
+                               (unit (list))
+                               (>>= read-int16
+                                    (λ (offset)
+                                      (>>= (loop (sub1 n))
+                                           (λ (offsets)
+                                             (unit (cons offset offsets))))))))))
+                      (λ (offsets) (unit (switch offsets))))]
+           [oc   ((super 'decode-instruction) oc)])])
    read-byte-extras))
 
 (provide instruction-read/version)

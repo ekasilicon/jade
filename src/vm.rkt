@@ -582,6 +582,15 @@
           [(i:block field)
            (primitive-apply block 1 field)])]))
 
+(define vm8
+  (inc (>>= pop switch)
+       [execute
+        (sumtype-case-lambda i:Instruction8
+          [(i:Instruction7 instr)
+           ((super 'execute) instr)]
+          [(i:switch offsets)
+           (>>= (pop) (λ (i) (switch offsets i)))])]))
+
 (define vm-extras
   (inc (pop
         unit >>= >>)
@@ -622,7 +631,7 @@
 (require "version.rkt")
 
 (define vm/version
-  (make-*/version 'vm/version vm0 vm1 vm2 vm3 vm4 vm5 vm6 vm7 vm-extras))
+  (make-*/version 'vm/version vm0 vm1 vm2 vm3 vm4 vm5 vm6 vm7 vm8 vm-extras))
 
 (provide vm/version
          vm-pseudo)

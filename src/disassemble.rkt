@@ -91,8 +91,8 @@
 
 (define (jump-destinations lsv σ)
   (let ([instructions (hash-ref σ 'instructions)]
-        [offset (let ([control (fix (instruction-control/version lsv))])
-                  (control 'offset))])
+        [offsets (let ([control (fix (instruction-control/version lsv))])
+                   (control 'offsets))])
     (let loop ([i (hash-ref σ 'initial)]
                [dsts (seteqv)])
       (match (hash-ref instructions i)
@@ -100,20 +100,19 @@
          dsts]
         [(cons instr next-i)
          (loop next-i
-               (cond
-                 [(offset instr)
-                  => (λ (dst)
-                       (cond
-                         [(= dst (hash-ref σ 'final))
-                          (if (< lsv 2)
-                            (error 'invalid-destination "cannot jump to end of instruction block prior to v2")
-                            (set-add dsts dst))]
-                         [(hash-has-key? instructions dst)
-                          (set-add dsts dst)]
-                         [else
-                          (error 'invalid-destination "jump not on instruction boundary")]))]
-                 [else
-                  dsts]))]))))
+               (foldl
+                (λ (dst dsts)
+                  (cond
+                    [(= dst (hash-ref σ 'final))
+                     (if (< lsv 2)
+                       (error 'invalid-destination "cannot jump to end of instruction block prior to v2")
+                       (set-add dsts dst))]
+                    [(hash-has-key? instructions dst)
+                     (set-add dsts dst)]
+                    [else
+                     (error 'invalid-destination "jump not on instruction boundary")]))
+                dsts
+                (or (offsets instr) (list))))]))))
 
 (define (σ→directives lsv σ)
   ; instructions is a map from a left boundary to a (list) or (cons instr next-i)
