@@ -20,9 +20,9 @@
            #\e 14 #\E 14
            #\f 15 #\F 15))
 
-(define octal-digit? (^^ "01234567"))
-(define decimal-digit? (^^ "0123456789"))
-(define hex-digit? (^^ "0123456789abcdefABCDEF"))
+(define octal-digit (mc "01234567"))
+(define decimal-digit (mc "0123456789"))
+(define hex-digit (mc "0123456789abcdefABCDEF"))
 
 (define ((make-digits→numeral radix) ds)
   (foldl (λ (d n) (+ (* n radix) (hash-ref digit-values d))) 0 ds))
@@ -30,8 +30,8 @@
 (define hex-digits→numeral (make-digits→numeral 16))
 
 (define hex-varuint
-  (>> (literal "0x")
-      (lift hex-digits→numeral (p+ (cc hex-digit?)))))
+  (>> (litp "0x")
+      (fmap hex-digits→numeral (+p hex-digit))))
 
 (module+ test
   (parse-success hex-varuint
@@ -41,8 +41,8 @@
 (define octal-digits→numeral (make-digits→numeral 8))
 
 (define octal-varuint
-  (>> (literal "0")
-      (lift octal-digits→numeral (p+ (cc octal-digit?)))))
+  (>> (litp "0")
+      (fmap octal-digits→numeral (+p octal-digit))))
 
 (module+ test
   (parse-success octal-varuint
@@ -52,7 +52,7 @@
 (define decimal-digits→numeral (make-digits→numeral 10))
 
 (define decimal-varuint
-  (lift decimal-digits→numeral (p+ (cc decimal-digit?))))
+  (fmap decimal-digits→numeral (+p decimal-digit)))
 
 (module+ test
   (parse-success decimal-varuint
@@ -101,18 +101,16 @@
 (provide (all-defined-out))
 
 (module+ test
-  (parse-failure (>>0 guarded-uint8 end-of-input)
+  (parse-failure guarded-uint8
                  "256"
                  #rx"fit in a byte"))
 
 (define (parse-varuint input)
-  ((>> whitespace*
-       (>>0 guarded-varuint
-            whitespace*
-            end-of-input))
-   input 0
-   (λ (xs _₀ _₁) (match-let ([(list x) xs]) x))
-   (λ () (error (report input 0 "a nonnegative integer literal (possibly surrounded by whitespace)")))))
+  (match-let ([(list x) (parse (>> space* (>>0 guarded-varuint space*)) input)])
+    x)
+  #;
+  (error (report input 0 "a nonnegative integer literal (possibly surrounded by whitespace)"))
+  )
 
 (provide parse-varuint)
 

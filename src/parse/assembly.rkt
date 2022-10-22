@@ -10,9 +10,14 @@
          "instruction.rkt"
          "../assembly.rkt")
 
+(define eolp
+  (∨ (cp #\newline)
+     (>> (cp #\return)
+         (cp #\newline))))
+
 (define pragma-directive
-  (>> (literal "#pragma ")
-      (lift (λ (cs) (pragma [content (apply string cs)])) (p* (p- (cc void) line-sentinel)))))
+  (>> (litp "#pragma ")
+      (fmap (λ (content) (pragma content)) (fmap list->string (⋆p (\\p charp eolp))))))
 
 (module+ test
   (parse-success pragma-directive
@@ -23,32 +28,34 @@
                  "#pragmahello"
                  #rx""))
 
-(define comment
-  (>> (literal "//")
-      (lift (λ (cs) (apply string cs)) (p* (p- (cc void) line-sentinel)))))
-
+(define byte-parser
+  (make-instruction-parser "byte" (λ (value) (bytes-immediate value)) guarded-bytes))
 
 (module+ test
-  (parse-success (>> whitespace*
-                     (>>0 (p? byte-parser)
-                          whitespace*
-                          (p? comment)
-                          line-sentinel))
+  (parse-success byte-parser
+                 "byte base64 ZWE="
+                 (bytes-immediate [value #"ea"])))
+
+(define comment
+  (>> (litp "//")
+      (fmap list->string (⋆p (\\p charp eolp)))))
+
+(module+ test
+  (parse-success (>> space*
+                     (>>0 byte-parser
+                          space*
+                          (?p comment)
+                          eolp))
                  "\tbyte base64 ZWE=\n"
                  (bytes-immediate [value #"ea"]))
 
-  (parse-success (>> whitespace*
-                     (>>0 (p? byte-parser)
-                          whitespace*
-                          (p? comment)
-                          line-sentinel))
+  (parse-success (>> space*
+                     (>>0 byte-parser
+                          space*
+                          (?p comment)
+                          eolp))
                  "\tbyte base64 ZWE= // this is a comment\n"
                  (bytes-immediate [value #"ea"])))
-
-(define label-declaration
-  (>>0 (>>= label-identifier (λ (ℓ) (unit (label ℓ))))
-       space*
-       (literal ":")))
 
 (define int-parser
   (make-instruction-parser "int" (λ (value) (varuint-immediate value)) guarded-varuint))
@@ -58,43 +65,43 @@
                  "int 25"
                  (varuint-immediate [value 25])))
 
-(define byte-parser
-  (make-instruction-parser "byte" (λ (value) (bytes-immediate value)) guarded-bytes))
-
-(module+ test
-  (parse-success byte-parser
-                 "byte base64 ZWE="
-                 (bytes-immediate [value #"ea"])))
+(define label-declaration
+  (>>0 (fmap (λ (ℓ) (label ℓ)) label-identifier)
+       space*
+       (litp ":")))
 
 (define (parse input)
-  ((>> whitespace* (>>0 pragma-directive line-sentinel))
+  ((>> space* (>>0 pragma-directive eolp))
    input 0
    (λ (xs i fk)
      (match xs
        [(list (pragma content))
         (match (regexp-match #px"^version (\\d+)$" content)
           [(list _ (app string->number lsv))
-           (let* ([directive (∨ (∨ (>>= (instruction-parser/version lsv) (λ (instr) (unit (instruction [instruction instr]))))
-                                   int-parser
-                                   byte-parser)
-                                pragma-directive
-                                label-declaration)]
-                  [line (>> whitespace*
-                            (>>0 (p? directive)
-                                 whitespace*
-                                 (p? comment)
-                                 line-sentinel))])
+           (let ([directive (∨ (∨ (fmap (λ (instr) (instruction [instruction instr])) (instruction-parser/version lsv))
+                                  int-parser
+                                  byte-parser)
+                               pragma-directive
+                               label-declaration)])
              (define (loop)
-               (∨ (>> whitespace* end-of-input (unit (list)))
-                  (>>= line (λ (directive)
-                              (if directive
-                                (>>= (loop)
-                                     (λ (directives)
-                                       (unit (cons directive directives))))
-                                (loop))))))
+               (∨ (>> space* (unit (list)))
+                  (fmap cons
+                        (>> space*
+                            (>>0 directive
+                                 space*
+                                 (?p comment)
+                                 (?p eolp)))
+                        (delay (loop)))
+                  (>> space*
+                      (?p comment)
+                      eolp
+                      (delay (loop)))))
              (match ((loop)
                      input i
-                     (λ (xs i fk) (match xs [(list x) x]))
+                     (λ (xs i fk)
+                       (if (= i (string-length input))
+                         (match-let ([(list x) xs]) x)
+                         (fk)))
                      (λ ()
                        (error 'bad-directive
                               (report input i
@@ -126,3 +133,4 @@
       [asm
        (displayln (assembly-show asm))
        (pretty-print (control-flow-graph asm))])))
+

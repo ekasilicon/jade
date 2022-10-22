@@ -5,39 +5,34 @@
          "uint.rkt")
 
 (define ((decode-baseXX digit-values value-width) cs)
-  (apply rkt:bytes
-         (let loop ([num-bits 0]
-                    [accumulator 0]
-                    [cs cs])
-           (if (< num-bits 8)
-             (match cs
-               [(list)
-                #;
-                (list (arithmetic-shift accumulator (- 8 num-bits)))
-                ; if there are no more characters, the remaining bits are discarded
-                (list)]
-               [(cons c cs)
-                (loop (+ num-bits value-width)
-                      (bitwise-ior (arithmetic-shift accumulator value-width)
-                                   (hash-ref digit-values c))
-                      cs)])
-             (cons (arithmetic-shift accumulator
-                                     (- 8 num-bits))
-                   (loop (- num-bits 8)
-                         (bitwise-and accumulator
-                                      (sub1 (arithmetic-shift 1 (- num-bits 8))))
-                         cs))))))
+  (list->bytes
+   (let loop ([num-bits 0]
+              [accumulator 0]
+              [cs cs])
+     (if (< num-bits 8)
+       (match cs
+         [(list)
+          #;
+          (list (arithmetic-shift accumulator (- 8 num-bits)))
+          ; if there are no more characters, the remaining bits are discarded
+          (list)]
+         [(cons c cs)
+          (loop (+ num-bits value-width)
+                (bitwise-ior (arithmetic-shift accumulator value-width)
+                             (hash-ref digit-values c))
+                cs)])
+       (cons (arithmetic-shift accumulator
+                               (- 8 num-bits))
+             (loop (- num-bits 8)
+                   (bitwise-and accumulator
+                                (sub1 (arithmetic-shift 1 (- num-bits 8))))
+                   cs))))))
 
 (define (baseXX-sequence baseXX-digit? multiple)
   (let loop ([i 0])
-    (∨ (>>= (>>= read-char
-                 (λ (c)
-                   (if (baseXX-digit? c)
-                     (unit c)
-                     fail)))
-            (λ (c) (>>= (loop (add1 i)) (λ (cs) (unit (cons c cs))))))
+    (∨ (fmap cons (?c baseXX-digit?) (delay (loop (add1 i))))
        (>>0 (unit (list))
-            (∨ (literal (make-string (remainder (- multiple (remainder i multiple)) multiple) #\=))
+            (∨ (litp (make-string (remainder (- multiple (remainder i multiple)) multiple) #\=))
                (unit))))))
 
 (define base64-digit-values
@@ -49,7 +44,7 @@
   (hash-has-key? base64-digit-values c))
 
 (define base64-bytes
-  (lift (decode-baseXX base64-digit-values 6)
+  (fmap (decode-baseXX base64-digit-values 6)
         (baseXX-sequence base64-digit? 4)))
 
 (module+ test
@@ -66,66 +61,65 @@
   (hash-has-key? base32-digit-values c))
 
 (define base32-bytes
-  (lift (decode-baseXX base64-digit-values 5)
+  (fmap (decode-baseXX base64-digit-values 5)
         (baseXX-sequence base32-digit? 8)))
 
 (define bytes-hex-literal
-  (>> (literal "0x")
-      (>>= (p* (lift hex-digits→numeral (read-chars 2 hex-digit?)))
-           (λ (bs) (unit (apply rkt:bytes bs))))))
+  (>> (litp "0x")
+      (fmap list->bytes (⋆p (fmap hex-digits→numeral (np 2 hex-digit))))))
 
 (module+ test
   (parse-success bytes-hex-literal
                  "0x3132333435"
                  #"12345")
 
-  (parse-failure (>>0 bytes-hex-literal end-of-input)
+  (parse-failure bytes-hex-literal
                  "0x313233343"
                  #rx""))
 
 (define bytes-string-literal
-  (>> (c #\")
-      (>>= (let loop ()
-             (>>= read-char
-                  (match-lambda
-                    [#\" (unit (list))]
-                    [#\\ (>>= (∨ (>>= read-char
+  (>> (cp #\")
+      (fmap
+       list->bytes
+       (let loop ()
+         (∨ (>> (cp #\") (unit (list)))
+            (fmap cons
+                  (>>= charp
+                       (match-lambda
+                         [#\\ (∨ (>>= charp
                                       (match-lambda
                                         [#\n (unit (char->integer #\newline))]
                                         [#\r (unit (char->integer #\return))]
                                         [#\t (unit (char->integer #\tab))]
                                         [#\\ (unit (char->integer #\\))]
                                         [#\" (unit (char->integer #\"))]
-                                        [#\x (lift hex-digits→numeral (read-chars 2 hex-digit?))]
+                                        [#\x (fmap hex-digits→numeral (np 2 hex-digit))]
                                         [_ fail]))
-                                 (lift octal-digits→numeral (read-chars 3 octal-digit?)))
-                              (λ (b) (>>= (loop) (λ (bs) (unit (cons b bs))))))]
-                    [c (let ([b (char->integer c)])
-                         (if (< b 256)
-                           (>>= (loop) (λ (bs) (unit (cons b bs))))
-                           fail))])))
-           (λ (bs) (unit (apply rkt:bytes bs))))))
+                                 (fmap octal-digits→numeral (np 3 octal-digit)))]
+                         [c (let ([b (char->integer c)])
+                              (if (< b 256) (unit b) fail))]))
+                  (delay (loop))))))))
 
 
 (define bytes
-  (∨ (>> (∨ (literal "base64")
-            (literal "b64"))
-         whitespace+
+  (∨ (>> (∨ (litp "base64")
+            (litp "b64"))
+         space+
          base64-bytes)
-     (>> (∨ (literal "base64")
-            (literal "b64"))
-         (literal "(")
+     (>> (∨ (litp "base64")
+            (litp "b64"))
+         (litp "(")
          (>>0 base64-bytes
-              (literal ")")))
-     (>> (∨ (literal "base32")
-            (literal "b32"))
-         whitespace+
+              (litp ")")))
+     (>> (∨ (litp "base32")
+            (litp "b32"))
+         space+
          base32-bytes)
-     (>> (∨ (literal "base32")
-            (literal "b32"))
-         (literal "(")
+     (>> (∨ (litp "base32")
+            (litp "b32"))
+         (litp "(")
          (>>0 base32-bytes
-              (literal ")")))
+              (litp ")")))
      bytes-hex-literal
      bytes-string-literal))
 
@@ -145,18 +139,11 @@
 (provide guarded-bytes)
 
 (define (parse-bytes input)
-  ((>> whitespace*
-       (>>0 guarded-bytes
-            whitespace*
-            (guard end-of-input
-                   "end of input")))
-   input 0
-   (λ (xs _₀ _₁) (match-let ([(list x) xs]) x))
-   (λ () (error (report input 0 "a bytes literal (possibly surrounded by whitespace)")))))
+  (match-let ([(list x) (parse (>> space* (>>0 guarded-bytes space*))
+                               input)])
+    x))
 
 (provide parse-bytes)
-
-
 
 (module+ test
   (parse-success guarded-bytes
@@ -177,7 +164,8 @@
   (check-equal? (parse-bytes "b64(aGVsbG8)")
                 #"hello")
   
-  (parse-bytes "b64(aGVsbG8) 123"))
+  (with-handlers ([exn:fail? void])
+    (parse-bytes "b64(aGVsbG8) 123")) )
 
 #;
 (module+ main

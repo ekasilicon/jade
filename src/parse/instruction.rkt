@@ -12,10 +12,19 @@
                      racket/match
                      syntax/parse))
 
+
+(define li-start
+  (mc "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-"))
+
+(define li-continuation
+  (∨ li-start (mc "0123456789")))
+
 (define label-identifier
-  (lift (λ (c cs) (string->symbol (apply string c cs)))
-        (∘ (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-"))
-           (p* (cc (^^ "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")))) ))
+  (fmap
+   string->symbol
+   (fmap
+    list->string
+    (fmap cons li-start (⋆p li-continuation)))))
 
 (provide label-identifier)
 
@@ -39,7 +48,7 @@
                                               [(record-info _ _ _ _ _ _)
                                                (with-syntax ([variant variant-id]
                                                              [name (symbol->string (syntax->datum variant-id))])
-                                                 (values #'(>> (literal name) (unit (variant)))
+                                                 (values #'(>> (litp name) (unit (variant)))
                                                          (list #'name)))]
                                               [(sumtype-info variant-ids _)
                                                (let-values ([(_ names) (loop variant-ids)])
@@ -63,13 +72,13 @@
      (raise-syntax-error #f "not a sumtype" typename)]))
 
 (define (make-instruction-parser name constructor . argument-parsers)
-  (>> (literal name)
+  (>> (litp name)
       (>>= (let loop ([arg-parsers argument-parsers])
              (match arg-parsers
                [(list)
                 (unit (list))]
                [(cons arg-parser arg-parsers)
-                (>> whitespace+
+                (>> space+
                     (>>= arg-parser
                          (λ (x)
                            (>>= (loop arg-parsers)
@@ -108,12 +117,13 @@
                                               ['i #'guarded-uint8]
                                               ['n #'guarded-uint8]
                                               ['s #'guarded-uint8]
-                                              ['uints #'(p* (>> whitespace* varuint))]
-                                              ['bytess #'(p* (>> whitespace* bytes))]
+                                              ['uints #'(delimitp space+ varuint)]
+                                              ['bytess #'(delimitp space+ bytes)]
                                               ['index #'guarded-uint8]
                                               ['group-index #'guarded-uint8]
                                               ['array-index #'guarded-uint8]
                                               ['offset #'guarded-label]
+                                              ['offsets #'(delimitp space+ label-identifier)]
                                               ['start #'guarded-uint8]
                                               ['end #'guarded-uint8]
                                               ['length #'guarded-uint8]
@@ -141,7 +151,7 @@
         (with-syntax ([(p ...) (map parser variants)])
           #'(∨ p ...))]
        [_
-        (raise-syntax-error #f "not a sumtype" #'typename)])]))
+        (raise-syntax-error #f "not a sumtype" #'instruction-id)])]))
 
 (define-syntax instruction-mixin
   (syntax-parser
@@ -282,6 +292,8 @@
            #:json-ref-type-field JSONRefType7
            #:vrf-verify-standard-field VRFVerifyStandard7
            #:block-field BlockField7)
+          (instruction-mixin
+           Instruction8)
           (inc ()))])
     (λ (lsv) ((fix (parser-object/version lsv)) 'instruction))))
 
@@ -318,4 +330,8 @@
 
   (parse-success (instruction-parser/version 7)
                  "json_ref JSONString"
-                 (json_ref [type (JSONString)])))
+                 (json_ref [type (JSONString)]))
+
+  (parse-success (instruction-parser/version 8)
+                 "switch hello there"
+                 (switch [offsets '(hello there)])))
