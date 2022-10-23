@@ -3,13 +3,11 @@
          racket/set
          racket/pretty
          net/base64
+         "disassemble.rkt"
          "../src/static/object.rkt"
-         "../src/instruction/read.rkt"
          "../src/instruction/name.rkt"
          "../src/instruction/version.rkt"
          "../src/monad.rkt"
-         "../src/read-byte.rkt"
-         "../src/prefix.rkt"
          "../src/vm.rkt")
 
 ; the base64 representation of the bytecode
@@ -18,41 +16,6 @@
 
 (define board-app-approval
   #"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")
-
-; a simple disassembler
-(define (disassemble b64-encoded-bytecode)
-  (match-let* ([(cons lsv bytecode)
-                (read-prefix (base64-decode b64-encoded-bytecode))]
-               [read-byte
-                (inc ()
-                     [unit
-                       (λ xs (λ (i) (cons xs i)))]
-                     [>>=
-                      (λ (m f)
-                        (λ (i)
-                          (match (m i)
-                            [(cons xs i)
-                             ((apply f xs) i)]
-                            [#f #f])))]
-                     [read-byte
-                      (λ (i)
-                        (and (< i (bytes-length bytecode))
-                             (cons (list (bytes-ref bytecode i)) (add1 i))))])]
-               [read-instruction ((fix (mix (instruction-read/version lsv)
-                                            read-byte-extras
-                                            monad-extras
-                                            read-byte))
-                                  'read-instruction)])
-    (values lsv
-            (let loop ([pc 0]
-                       [assembly (hasheqv)])
-              (match (read-instruction pc)
-                [(cons (list instr) succ-pc)
-                 (loop succ-pc
-                       (hash-set assembly pc (cons instr succ-pc)))]
-                [#f
-                 (hash-set assembly pc (list))])))))
-
 
 (define (make→ lsv assembly)
   ((fix (mix (vm/version lsv)
@@ -254,20 +217,20 @@
                                ((put 'pc) pc))]))])
              (inc (unit >>= >>
                    get put upd)
-                  [itxn-begin
+                  [inner-transaction-begin
                    ((put 'itxns) (cons (hasheq) (list)))]
-                  [itxn-field
+                  [inner-transaction-field
                    (λ (f v)
                      (>>= (get 'itxns (list))
                           (match-lambda
                             [(cons itxn itxns)
                              ((put 'itxns) (cons (hash-set itxn f v) itxns))])))]
-                  [itxn-submit
+                  [inner-transaction-submit
                    (>>= (get 'itxns (list))
                         (λ (itxns)
                           (>> (upd 'itxns-submitted (list) (λ (itxnss) (cons itxns itxnss)))
                               ((put 'itxns) (list)))))]
-                  [itxn
+                  [inner-transaction
                    (λ (f)
                      (>>= (get 'itxns-submitted (list))
                           (λ (itxnss)
