@@ -85,7 +85,10 @@
                      (λ (ς)
                        `(panic ,(apply format template args) ,ς)))]
                   [return
-                   (λ (code) (λ (ς) `(return ,code ,ς)))]
+                   (λ (code)
+                     (if (eq? (type-of code) 'uint64)
+                       (λ (ς) `(return ,code ,ς))
+                       (raise (list 'return code))))]
                   [mplus
                    (λ ms (λ (ς) (foldr (λ (m M) `(both ,(m ς) ,M)) `(none) ms)))])
              (inc ()
@@ -129,7 +132,7 @@
                            (>> ((put 'stack) stk)
                                (unit x))]
                           [(list)
-                           (panic "tried to pop an empty stack")]))])
+                           (raise "tried to pop an empty stack")]))])
              (inc (unit >>= panic
                    put get)
                   [put-intcblock
@@ -220,13 +223,7 @@
                        [(bytes? key)
                         (unit `(app-global ,key))]
                        [else
-                        (raise (list 'app-global-get key))])
-                     #;
-                     (if (eq? key 'bytes)
-                       (>>= (get 'table (hasheqv)))
-                       (mplus (unit 'uint64)
-                              (unit 'bytes))
-                       (raise (list 'app-global-get key))))]
+                        (raise (list 'app-global-get key))]))]
                   [app-global-put
                    (λ (key val)
                      (cond
@@ -277,17 +274,20 @@
              (inc (unit >>= >> mplus panic
                    pop
                    get put)
+                  [assert-has-type
+                   (λ (who τ₀ τ₁)
+                     (>>= (get 'table (hash))
+                          (λ (σ)
+                            (cond
+                              [(unify τ₀ τ₁ σ)
+                               => (put 'table)]
+                              [else
+                               (raise (list who τ₀ τ₁))]))))]
                   [is-zero
                    (λ (x)
                      (if (exact-nonnegative-integer? x)
                        (unit (zero? x))
-                       (>> (>>= (get 'table (hash))
-                               (λ (σ)
-                                 (cond
-                                   [(unify x 'uint64 σ)
-                                    => (put 'table)]
-                                   [else
-                                    (raise (list 'is-zero x))])))
+                       (>> (assert-has-type 'is-zero x 'uint64)
                            (mplus (unit #t)
                                   (unit #f)))))]
                   [op
@@ -300,14 +300,9 @@
                                         [τ (in-list (map type-of τs))]
                                         [i (in-naturals)])
                                (>> m
-                                   (>>= (get 'table (hash))
-                                        (λ (σ)
-                                          (cond
-                                            [(unify τᵢ τ σ)
-                                             => (put 'table)]
-                                            [else
-                                             #;(panic "~a expected ~a at position ~a but got ~a" name τᵢ i τ)
-                                             (raise (list 'op name τₒs τᵢs τs))])))))
+                                   (assert-has-type
+                                    (list 'op name τₒs τᵢs τs)
+                                    τᵢ τ)))
                              (apply unit τₒs))
                          (error 'op "~a: lengths don't match; got ~a but expected ~a" name τs τᵢs))))]
                   [u==
@@ -414,7 +409,6 @@
                          [`(normal () ,ς)
                           (analyze ς seen σs)]
                          [`(panic ,msg ,ς)
-                          #;(displayln msg)
                           (values seen σs)]
                          [`(return ,code ,ς)
                           (values seen
@@ -436,6 +430,24 @@
              (raise (list 'join σ₀ σ x₀))]))))))
 
 
+; This typechecker determines:
+; 1. that each operation in the program is applied to type-correct arguments, and
+; 2. that a pop operation is never performed on an empty stack.
+
+; It does not distinguish between the scratchspaces of different preceding
+; contracts in the transaction group.
+
+; It does not implement every opcode, but enough are implemented to illustrate
+; the approach.
+
+; It does not check that the globals at particular keys have the assumed type;
+; instead, it prints the assumptions that underly its declaration of type safety.
+
+; The type system that it implements is simple in the technical sense. Therefore,
+; it is possible for a program to actually be type correct but not typecheck.
+; One virtue of a simple type system such as this is that it accepts only
+; type-correct code which is *obviously* type-correct.
+
 (define (typecheck-program b64-encoded-bytecode)
   (let ([σ (time (typecheck b64-encoded-bytecode))])
     (displayln "program is type safe, assuming:")
@@ -445,10 +457,9 @@
                 [`(app-global ,key)
                  (format "the global at key ~s" (bytes->string/utf-8 key))]
                 [`(app-global ,app-id ,key)
-                 (format "the global of app with id ~a at key ~s" app-id (bytes->string/utf-8 key))]
+                 (format "the global of app ~a at key ~s" app-id (bytes->string/utf-8 key))]
                 [`(gload ,i)
-                 (format "each prior scratchspace at slot ~a" i)]
-                )
+                 (format "each prior scratchspace at slot ~a" i)])
               τ))))
 
 (typecheck-program postmodern-app-approval)
