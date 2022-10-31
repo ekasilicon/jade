@@ -60,7 +60,7 @@
             (call-with-output-file path (λ (op) (write-json json op))))
           (printf "done\n")))))
   (match (current-command-line-arguments)
-    [(vector net-id "index")
+    [(vector net-id "index" rst ...)
      (cond
        [(hash-ref nets net-id #f)
         => (λ (explorer-base)
@@ -72,14 +72,20 @@
                 applications))
              (parameterize ([current-net-id net-id]
                             [current-explorer-base explorer-base])
-               (let loop ([next #f])
-                 (match (read-json (applications #:limit "200" #:next next))
-                   [(hash-table ('applications applications)
-                                ('next-token next))
-                    (save!* applications)
-                    (loop next)]
-                   [(hash-table ('applications 'null))
-                    (void)]))
+               (let loop ([left (match rst
+                                  [(list) +inf.0]
+                                  [(list (app string->number n)) n])]
+                          [next #f])
+                 (unless (zero? left)
+                   (let ([n (min left 200)])
+                     (match (read-json (applications #:limit (number->string n)
+                                                     #:next next))
+                       [(hash-table ('applications applications)
+                                    ('next-token next))
+                        (save!* applications)
+                        (loop (- left n) next)]
+                       [(hash-table ('applications 'null))
+                        (void)]))))
                (displayln "done indexing")))]
        [else
         (displayln "expected <net-id> as first argument; one of...")
