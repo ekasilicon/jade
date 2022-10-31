@@ -2789,3 +2789,23 @@ ASSEMBLY
 
 (pretty-print postmodern-assembly)
 (pretty-print board-assembly)
+
+(require "../src/assembly/show.rkt")
+
+(displayln (assembly-show board-assembly))
+
+(define version8-assembly
+  (parse #<<ASSEMBLY
+#pragma version 8
+	switch label1 label2 label3
+label1:
+        err
+label2:
+        err
+label3:
+        err
+ASSEMBLY
+         ))
+
+(pretty-print version8-assembly)
+(displayln (assembly-show version8-assembly))

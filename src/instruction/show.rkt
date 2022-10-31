@@ -70,6 +70,7 @@
                                                      ['encoding #'(self 'base64-encoding-show)]
                                                      ['type #'(self 'json-ref-type-show)]
                                                      ['standard #'(self 'vrf-verify-standard-show)]
+                                                     ['offsets #'(self 'labels-show)]
                                                      ['field
                                                       (match (syntax->datum variant-id)
                                                         [(or 'txn 'gtxn 'txna 'gtxna 'gtxns 'gtxnsa 'itxn_field 'itxn 'itxna 'itxnas 'txnas 'gtxnas 'gtxnsas 'gitxn 'gitxna 'gitxnas)
@@ -162,6 +163,9 @@
          (enumtype-shower VRFVerifyStandard7 vrf-verify-standard-show)]
         [block-field-show
          (enumtype-shower BlockField7 block-field-show)])
+   (inc ()
+        [instruction-show
+         (instruction-shower Instruction8)])
    (inc ())))
 
 (provide instruction-show/version)

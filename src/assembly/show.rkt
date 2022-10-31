@@ -24,7 +24,9 @@
                                   [bytes-show
                                    (λ (bs) (string-append "base64(" (bytes->string/utf-8 (base64-encode bs #"")) ")"))]
                                   [bytess-show
-                                   (λ (bss) (string-join (map (self 'bytes-show) bss) " "))])))])
+                                   (λ (bss) (string-join (map (self 'bytes-show) bss) " "))]
+                                  [labels-show
+                                   (λ (ℓs) (string-join (map (self 'label-show) ℓs) " "))])))])
          (values (show 'instruction-show)
                  (show 'label-show)
                  (show 'uint-show)
