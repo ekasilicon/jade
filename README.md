@@ -10,8 +10,15 @@ jade has comprehensive support for TEALv3 and lower and near-comprehensive suppo
 jade's only dependency is an installation of [Racket](https://download.racket-lang.org), version 8.2 or greater.
 There is no obvious reason that earlier versions (within the last few years) should not work; please let us know if you run into problems with a specific version or platform.
 
+Jade can be run using `./jade`, after installing the appropriate dependencies as follows:
+
+```bash
+raco pkg install --deps search-auto compiler-lib
+```
+
 The `Dockerfile` in the repository is configured to obtain Racket and run jade.
 The included script [build.sh](build.sh) uses Docker to build jade and [run.sh](run.sh) runs the newly-built jade, passing arguments from the command line.
+
 
 ## Usage
 
