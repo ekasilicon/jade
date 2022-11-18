@@ -1,9 +1,13 @@
 # jade
 
-jade is a static analysis platform and suite for TEAL programs.
+jade is a TEAL program analyzer built on an extensible semantic framework so that new analyzers, visualizers, and other tools can be rapidly constructed.
 
-jade currently provides the *Unconstrained Parameter Analysis*, which checks whether the program sensibly constrains the `OnCompletion` and `RekeyTo` transaction fields.
-jade has comprehensive support for TEALv3 and lower and near-comprehensive support for TEALv6 and lower.
+jade currently provides
+
+- a typechecker for TEAL version <= 8, and
+- the *Unconstrained Parameter Analysis* for TEAL version <= 3, which checks whether the program sensibly constrains the `OnCompletion` and `RekeyTo` transaction fields.
+
+The semantic framework has comprehensive support for TEALv8 and lower.
 
 ## Installation
 
@@ -26,8 +30,8 @@ jade is designed to be self-documenting insofar as possible.
 Running jade without any arguments will print instructions.
 
 In brief, jade ingests
-TEALv6 program bytecode,
-TEALv6 program assembly, or
+TEALv8 program bytecode,
+TEALv8 program assembly, or
 a JSON package produced by the Algorand Indexer v2 (as implemented by [AlgoExplorer](https://algoexplorer.io), for example)
 and analyzes it.
 After analysis, jade prints a report which includes program disassembly and a result summary of the *Unconstrained Property Analysis*.
@@ -35,21 +39,15 @@ After analysis, jade prints a report which includes program disassembly and a re
 jade allows you to specify symbolic names for hard-coded constants so that the program can be treated as a template.
 This functionality allows one to apply analysis results to all programs instantiated from that template, as opposed to a single, specific program.
 
-###
+### Example
 
-Example:
+To download and analyze the JSON package of an application with `<application-id>`, use
 
 ```
 curl https://algoindexer.algoexplorerapi.io/v2/applications/<application-id> | ./jade --json-package
 ```
 
-## Roadmap
-
-We are working to enhance jade in the following four ways:
-
-1. Improve the *Unconstrained Parameter Analysis* to support all transaction parameters.
-
-2. Introduce additional generic analyses to the suite---generic in the sense that they apply to programs generally and do not verify program-specific behaviors.
-
-3. Improve the analyzer API to make it easier to build on the platform.
+By default, jade will print the disassembled code for inspection and run the typechecker.
+Options to suppress printing of the disassembled code and running the typechecker, as well as an option to invoke UPA, are available and documented.
+Use `./jade --help` to see usage instructions and details about the available analyses.
 

@@ -35,7 +35,22 @@ The `assembly/control.rkt` exports the `control-flow-graph` function which produ
 ## Constructing Tools that Operate on TEAL Programs
 
 The Jade framework is implemented in superset of a subset of Racket which does not include observable mutation and makes regular use of higher-order functions.
-It is organized using Racket's module system and three minor extensions to Racket: pure object prototype wrappers, records, and sum types.
+It is organized using Racket's module system and three minor extensions to Racket: pure object prototype wrappers (mixins), records, and sum types.
+
+Constructing a tool that operates on TEAL programs is simply a matter of assembling the pieces.
+
+First, determine whether the tool will ingest TEAL source or bytecode. Jade provides both a parser and disassembler which each produce an `assembly` record with fields for the `logic-sig-version` and list of `directives`. It also provides a generic instruction reader mixin to offer more control over the disassembly process and result. See `examples/README.md` for details.
+
+Once an internal representation for the TEAL program is settled, the heart of the tool can be constructed.
+Jade provides a virtual machine mixin (defined in `vm.rkt`) which handles the execution of the machine but delegates the behavior of each operation to user-definable methods.
+
+For example, many instructions `push` values onto and `pop` values off the stack.
+What `push` and `pop` mean is defined by the user, and that meaning is used for each instruction, so that only the unique behavior to each tool need be defined by the user.
+The VM also ensures that only transaction components (instructions, transaction fields, etc.) available in the declared version can be operated on.
+
+See `examples/README.md` which details this process on an example analyzer.
+
+Following is a description of the mixin system ("pure object prototype wrappers") followed by a characterization of the virtual machine in terms of them.
 
 ### Pure Object Prototype Wrappers
 
