@@ -3,19 +3,19 @@
          (only-in racket/list append-map)
          (only-in racket/string string-join)
          racket/set
-         "static/object.rkt"
-         "static/record.rkt"
-         "static/sumtype.rkt"
-         "error.rkt"
-         "monad.rkt"
-         "assembly.rkt"
-         "disassemble.rkt"
-         "assembly/control.rkt"
-         "vm.rkt"
-         (prefix-in i: "instruction.rkt")
-         "instruction/version.rkt"
-         "instruction/control.rkt"
-         (rename-in "abstraction.rkt"
+         "../static/object.rkt"
+         "../static/record.rkt"
+         "../static/sumtype.rkt"
+         "../jade-error.rkt"
+         "../report.rkt"
+         "../monad.rkt"
+         "../assembly.rkt"
+         "../assembly/control.rkt"
+         "../vm.rkt"
+         (prefix-in i: "../instruction.rkt")
+         "../instruction/version.rkt"
+         "../instruction/control.rkt"
+         (rename-in "../abstraction.rkt"
                     [application-id% txn:application-id%]
                     [rekey-to%       txn:rekey-to%]
                     [on-completion%  txn:on-completion%]))
@@ -137,23 +137,7 @@
            (values (o 'offset-map)
                    (o 'has-inorder-successor?))))
   (mix
-   #;
-   (inc (>> trace)
-        [step
-         (>> (trace (λ (ς _) (pretty-print
-                              (hash-update ς 'pc (letrec ([go (match-lambda
-                                                                [(list* instr₀ instr₁ _)
-                                                                 (list* (offset-map go instr₀)
-                                                                        (offset-map go instr₁)
-                                                                        (list))]
-                                                                [(list* instr₀ _)
-                                                                 (list* (offset-map go instr₀)
-                                                                        (list))]
-                                                                [(list)
-                                                                 (list)])])
-                                                   go)))))
-             (super 'step))])
-   
+   vm-pseudo
    (vm/version lsv)
    concrete-stack%
    concrete-cblock%
@@ -402,8 +386,6 @@
              (f ς ctx)
              (list (underway [values (list)] ς ctx))))])))
 
-(require racket/pretty)
-
 (define (analyze vm ς ctx)
   (let ([→ (vm 'step)])
     (match ((vm 'initialize-context) ς ctx)
@@ -414,10 +396,10 @@
           (λ ()
             (channel-put
              ch
-             (let/ec return
+             (with-handlers ([jade-error? (λ (e) e)])
                (letrec ([loop (λ (seen finals ς ctx)
                                 (if (> (set-count seen) 10000)
-                                  (return (error 'timeout "exceeded 10000 states"))
+                                  (jade-error 'UPA "timeout: exceeded 10000 states")
                                   (if (set-member? seen ς)
                                     (values seen finals)
                                     (for/fold ([seen (set-add seen ς)]
@@ -442,14 +424,6 @@
           (kill-thread th)
           (error 'timeout "exceeded 10 seconds")])])))
 
-(record execution-context (approval-program
-                           clear-state-program
-                           global-num-byte-slice
-                           global-num-uint
-                           local-num-byte-slice
-                           local-num-uint
-                           global-state))
-
 (define (report reports)
   (string-append
    "Unconstrained Property Analysis"
@@ -462,32 +436,26 @@
      reports)
     "\n")))
 
-(define current-UPA-report (make-parameter report))
-
 (define (UPA asm ctx mapped-constants)
-  (error->>= (control-flow-graph asm)
-             (match-lambda
-               [(cons lsv cfg)
-                (if (<= lsv 3)
-                  (error->>= (analyze (fix (make-vm lsv))
-                                      (hasheq 'logic-sig-version lsv
-                                              'pc                cfg
-                                              'stack             (list)
-                                              'scratch-space     (hasheqv)
-                                              'intcblock         (list)
-                                              'bytecblock        (list)
-                                              'mapped-constants  mapped-constants)
-                                      (list (hasheq)
-                                            #f
-                                            #f))
-                             (λ (ctxs) ((current-UPA-report) (assess ctxs))))
-                  (error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))])))
+  (match (control-flow-graph asm)
+    [(cons lsv cfg)
+     (if (<= lsv 3)
+       (let ([ctxs (analyze (fix (make-vm lsv))
+                            (hasheq 'logic-sig-version lsv
+                                    'pc                cfg
+                                    'stack             (list)
+                                    'scratch-space     (hasheqv)
+                                    'intcblock         (list)
+                                    'bytecblock        (list)
+                                    'mapped-constants  mapped-constants)
+                            (list (hasheq)
+                                  #f
+                                  #f))])
+         (report (assess ctxs)))
+       (jade-error 'unsupported-logic-sig-version "does not support LogicSigVersion = ~a > 3" lsv))]))
 
 
 (define (assess ctxs)
-  (define OK "\x1b[32mOK\033[m")
-  (define ALERT "\x1b[33mALERT\033[m")
-  (define CRITICAL "\x1b[31mCRITICAL\033[m")
   (let ([txns (for/set ([ctx (in-set ctxs)])
                 (match-let ([(list txn glbl glbl-state) ctx])
                   txn))])
@@ -577,4 +545,4 @@ All executions constrain RekeyTo to ZeroAddress.
 MSG
                               OK))]))))])))   
 
-(provide execution-context UPA current-UPA-report)
+(provide UPA)

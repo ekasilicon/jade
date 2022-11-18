@@ -4,24 +4,49 @@
          racket/port
          json
          net/base64
-         "error.rkt"
+         "jade-error.rkt"
          "parse.rkt"
          "disassemble.rkt"
          "assembly/show.rkt"
-         "unconstrained-property-analysis.rkt")
+         "execution-context.rkt"
+         "analyses/unconstrained-property-analysis.rkt"
+         "analyses/typecheck.rkt")
 
 (define (command-line)
-  (with-handlers ([exn:fail? (λ (e) (error 'racket-error (exn-message e)))])
+  (with-handlers ([jade-error? (λ (e) e)]
+                  [exn:fail? (λ (e) (jade-error 'racket-error (exn-message e)))])
     (let ([mapped-constants (hash)]
           [assembly? #t]
-          [UPA? #t]
+          [UPA? #f]
+          [typecheck? #t]
           [mode #f])
       (r:command-line
        #:program "jade"
        #:argv (current-command-line-arguments)
        #:usage-help
        ""
-       "jade analyzes the TEAL program bytecode supplied to standard input."
+       "jade typechecks the TEAL program bytecode supplied to standard input"
+       "and optionally runs the Unconstrained Property Analysis."
+       ""
+       "The typechecker determines:"
+       ""
+       "  1. that each operation in the program is applied to type-correct arguments, and"
+       "  2. that a pop operation is never performed on an empty stack."
+       ""
+       "It does not distinguish between the scratchspaces of different preceding"
+       "contracts in the transaction group."
+       ""
+       "It works only with statically-known keys for global and local storage. Additionally,"
+       "it requires that all values at the same key, regardless of the application ID, have"
+       "the same type."
+       "If the program is pulled from a JSON package, it checks that the globals at particular"
+       "keys have the assumed type; if not, it prints the assumptions that underly its declar-"
+       "aration of type safety."
+       ""
+       "The type system that it implements is simple in the technical sense. Therefore,"
+       "it is possible for a program to actually be type correct but not typecheck."
+       "One virtue of a simple type system such as this is that it accepts only"
+       "type-correct code which is *obviously* type-correct."
        #:multi
        [("--symbolic-bytes" "-b") symbol bytes-constant
         ("Treats the use of <bytes-constant> in a TEAL program"
@@ -34,7 +59,8 @@
          "By instantiating these constants with unique dummy"
          "values, jade can analyze an assembled program"
          "which is representative of all programs which"
-         "complete the template.")
+         "complete the template."
+         "Applies to the Unconstrained Property Analysis only.")
         (let ([symbol (string->symbol symbol)]
               [parsed-bytes-constant (parse-bytes bytes-constant)])
           (cond
@@ -59,7 +85,8 @@
          "By instantiating these constants with unique dummy"
          "values, jade can analyze an assembled program"
          "which is representative of all programs which"
-         "complete the template.")
+         "complete the template."
+         "Applies to the Unconstrained Property Analysis only.")
         (let ([symbol (string->symbol symbol)]
               [parsed-uint-constant (parse-varuint uint-constant)])
           (cond
@@ -80,8 +107,12 @@
         ("Tell jade not to print the assembly of the ingested"
          "program.")
         (set! assembly? #f)]
-       [("--no-UPA-report")
-        ("Tell jade not to run the Unconstrained Parameter Analysis.")
+       [("--no-typecheck-report")
+        ("Tell jade not to run the typechecker.")
+        (set! typecheck? #f)]
+       [("--UPA-report")
+        ("Tell jade to run the Unconstrained Property Analysis (UPA)."
+         "The UPA runs only for TEALv3 programs and earlier.")
         (set! UPA? #f)]
        #:once-any
        [("--json-package")
@@ -108,7 +139,8 @@
         ("Tell jade to expect assembly on standard input")
         (set! mode 'assembly)]
        #:usage-help
-       "It expects either the --json-package flag or the --raw-binary flag,"
+       ""
+       "It expects the --json-package, --raw-binary, or --assembly flag,"
        "each documented below."
        #:args ()
        (define (standard-input-bytes expected)
@@ -122,86 +154,86 @@
        (define (UPA-report asm ctx)
          (and UPA?
               (cons 'UPA (UPA asm ctx mapped-constants))))
+       (define (typecheck-report asm ctx)
+         (and typecheck?
+              (cons 'typecheck (typecheck asm ctx))))
        (match mode
          ['raw-binary
-          (error->>= (standard-input-bytes "raw binary")
-                     (λ (bs) (λ () (error->>= (disassemble bs)
-                                              (λ (asm)
-                                                (list (assembly-report "Disassembled instructions" asm)
-                                                      (UPA-report asm #f)))))))]
+          (λ ()
+            (let ([asm (disassemble (standard-input-bytes "raw binary"))])
+              (list (assembly-report "Disassembled instructions" asm)
+                    (UPA-report asm #f)
+                    (typecheck-report asm #f))))]
          ['assembly
-          (error->>= (standard-input-bytes "assembly")
-                     (λ (bs) (λ () (error->>= (parse (bytes->string/utf-8 bs))
-                                              (λ (asm)
-                                                (list (assembly-report "Parsed instructions" asm)
-                                                      (UPA-report asm #f)))))))]
+          (λ ()
+            (let ([asm (parse (bytes->string/utf-8 (standard-input-bytes "assembly")))])
+              (list (assembly-report "Parsed instructions" asm)
+                    (UPA-report asm #f)
+                    (typecheck-report asm #f))))]
          ['json-package
-          (error->>= (standard-input-bytes "JSON package")
-                     (λ (bs)
-                       (λ ()
-                         (error->>= (with-handlers ([exn:fail:read? (λ (e) (error 'invalid-json "Package input not valid JSON"))])
-                                      (read-json (open-input-bytes bs)))
-                                    (letrec ([loop (match-lambda
-                                                     [(hash-table ('id id)
-                                                                  ('params (and params
-                                                                                (hash-table ('approval-program    approval-program)
-                                                                                            ('clear-state-program clear-state-program)
-                                                                                            ('creator             creator)
-                                                                                            ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
-                                                                                                                              ('num-uint       global-num-uint)))
-                                                                                            ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
-                                                                                                                              ('num-uint       local-num-uint)))))))
-                                                      (if (or (eq? approval-program 'null)
-                                                              (eq? clear-state-program 'null))
-                                                        (error 'program-missing "Program was null in package")
-                                                        (let ([global-state (match params
-                                                                              [(hash-table ('global-state global-entries))
-                                                                               (for/hash ([entry (in-list global-entries)])
-                                                                                 (match entry
-                                                                                   [(hash-table ('key key) ('value value))
-                                                                                    (values (base64-decode (string->bytes/utf-8 key))
-                                                                                            (match (hash-ref value 'type)
-                                                                                              [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
-                                                                                              [2 (hash-ref value 'uint)]))]))]
-                                                                              [_
-                                                                               #f])])
-                                                          (error->>= (disassemble (base64-decode (string->bytes/utf-8 approval-program)))
-                                                                     (λ (asm)
-                                                                       (list (assembly-report "Disassembled instructions" asm)
-                                                                             (UPA-report asm
-                                                                                         (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
-                                                                                                            [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
-                                                                                                            global-num-byte-slice
-                                                                                                            global-num-uint
-                                                                                                            local-num-byte-slice
-                                                                                                            local-num-uint
-                                                                                                            global-state)))))))]
-                                                     [(hash-table ('application application))
-                                                      (loop application)]
-                                                     [(hash-table ('message message))
-                                                      (error 'algoexplorer message)]
-                                                     [json
-                                                      (error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by Algorand Indexer v2?)")])])
-                                      loop)))))]
+          (λ ()
+            (let loop ([json (with-handlers ([exn:fail:read? (λ (e) (jade-error 'invalid-json "Package input not valid JSON"))])
+                               (read-json (open-input-bytes (standard-input-bytes "JSON package"))))])
+              (match json
+                [(hash-table ('id id)
+                             ('params (and params
+                                           (hash-table ('approval-program    approval-program)
+                                                       ('clear-state-program clear-state-program)
+                                                       ('creator             creator)
+                                                       ('global-state-schema (hash-table ('num-byte-slice global-num-byte-slice)
+                                                                                         ('num-uint       global-num-uint)))
+                                                       ('local-state-schema  (hash-table ('num-byte-slice local-num-byte-slice)
+                                                                                         ('num-uint       local-num-uint)))))))
+                 (if (or (eq? approval-program 'null)
+                         (eq? clear-state-program 'null))
+                   (jade-error 'program-missing "Program was null in package")
+                   (let* ([global-state (match params
+                                          [(hash-table ('global-state global-entries))
+                                           (for/hash ([entry (in-list global-entries)])
+                                             (match entry
+                                               [(hash-table ('key key) ('value value))
+                                                (values (base64-decode (string->bytes/utf-8 key))
+                                                        (match (hash-ref value 'type)
+                                                          [1 (base64-decode (string->bytes/utf-8 (hash-ref value 'bytes)))]
+                                                          [2 (hash-ref value 'uint)]))]))]
+                                          [_
+                                           #f])]
+                          [asm (disassemble (base64-decode (string->bytes/utf-8 approval-program)))])
+                     (let ([ctx (execution-context [approval-program     (base64-decode (string->bytes/utf-8 approval-program))]
+                                                   [clear-state-program  (base64-decode (string->bytes/utf-8 clear-state-program))]
+                                                   global-num-byte-slice
+                                                   global-num-uint
+                                                   local-num-byte-slice
+                                                   local-num-uint
+                                                   global-state)])
+                       (list (assembly-report "\nDisassembled instructions" asm)
+                             (UPA-report asm ctx)
+                             (typecheck-report asm ctx)))))]
+                [(hash-table ('application application))
+                 (loop application)]
+                [(hash-table ('message message))
+                 (jade-error 'algoexplorer message)]
+                [json
+                 (jade-error 'invalid-package-format "Input JSON did not match expected format. (Was it produced by Algorand Indexer v2?)")])))]
          [#f
           (match (current-command-line-arguments)
             ; no arguments at all
             [(vector)
-             (error 'no-arguments
+             (jade-error 'no-arguments
                     #<<MESSAGE
 usage: jade [ <option> ... ]
   
 jade analyzes the TEAL program bytecode supplied to standard input.
-It expects either the --json-package flag or the --raw-binary flag.
-Guidance for use of these flags, and others, is avaliable via the
-command
+It expects either the --json-package flag, the --raw-binary flag, or
+the --assembly flag. Guidance for use of these flags, and others,
+is avaliable via the command
 
                         jade --help
 
 MESSAGE
-                )]
+                    )]
             [_
-             (error 'bad-flag "Expected either --raw-binary or --json-package flag.")])])))))
+             (jade-error 'bad-flag "Expected the --json-package, --raw-binary, or --assembly flag.")])])))))
 
 (provide command-line)
 
@@ -226,11 +258,11 @@ MESSAGE
     (exit 255))
   
   (match result
-    [(error-result tag message)
+    [(jade-error tag message)
      (report-error tag message #f)]
     [action
      (match (action)
-       [(error-result tag message)
+       [(jade-error tag message)
         (report-error tag message #t)]
        [reports
         (for-each
@@ -239,7 +271,7 @@ MESSAGE
             (void)]
            [(cons _ report)
             (match report
-              [(error-result tag message)
+              [(jade-error tag message)
                (display "ERROR ")
                (display message)]
               [report
