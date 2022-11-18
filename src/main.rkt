@@ -150,7 +150,7 @@
              bs)))
        (define (assembly-report description asm)
          (and assembly?
-              (cons 'assembly (string-append description "\n" (assembly-show asm)))))
+              (cons 'assembly (string-append "\n" description "\n" (assembly-show asm)))))
        (define (UPA-report asm ctx)
          (and UPA?
               (cons 'UPA (UPA asm ctx mapped-constants))))
@@ -206,7 +206,7 @@
                                                    local-num-byte-slice
                                                    local-num-uint
                                                    global-state)])
-                       (list (assembly-report "\nDisassembled instructions" asm)
+                       (list (assembly-report "Disassembled instructions" asm)
                              (UPA-report asm ctx)
                              (typecheck-report asm ctx)))))]
                 [(hash-table ('application application))
@@ -241,6 +241,7 @@ MESSAGE
   (define result
     (command-line))
 
+  #;
   (uncaught-exception-handler
    (λ (e)
      (displayln "jade internal error:")
@@ -256,28 +257,18 @@ MESSAGE
       (display "ERROR "))
     (displayln message)
     (exit 255))
-  
-  (match result
-    [(jade-error tag message)
-     (report-error tag message #f)]
-    [action
-     (match (action)
-       [(jade-error tag message)
-        (report-error tag message #t)]
-       [reports
-        (for-each
-         (match-lambda
-           [#f
-            (void)]
-           [(cons _ report)
-            (match report
-              [(jade-error tag message)
-               (display "ERROR ")
-               (display message)]
-              [report
-               (displayln report)])
-            (newline)])
-         reports)])]))
+
+  (with-handlers ([jade-error? (match-lambda
+                                 [(jade-error tag message)
+                                  (report-error tag message #t)])])
+    (for-each
+     (match-lambda
+       [#f
+        (void)]
+       [(cons _ report)
+        (newline)
+        (displayln report)])
+     (result))))
 
 
 

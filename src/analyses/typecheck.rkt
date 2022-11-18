@@ -178,7 +178,7 @@
                      [`#s(Lease) 'bytes]
                      [`#s(Receiver) 'bytes]
                      [`#s(Amount) 'uint64]
-                     [`#s(CloseRemaniderTo) 'bytes]
+                     [`#s(CloseRemainderTo) 'bytes]
                      [`#s(VotePK) 'bytes]
                      [`#s(SelectionPK) 'bytes]
                      [`#s(VoteFirst) 'uint64]
@@ -395,7 +395,7 @@
                                         [i (in-naturals)])
                                (>> m
                                    (assert-has-type
-                                    (list 'op name τₒs τᵢs τs)
+                                    name #;(list 'op name τₒs τᵢs τs)
                                     τᵢ τ)))
                              (apply unit τₒs))
                          (jade-error 'typechecker "op ~a: lengths don't match; got ~a but expected ~a" name τs τᵢs))))]
@@ -425,7 +425,11 @@
                   [mulw
                    (op 'mulw '(uint64 uint64) 'uint64 'uint64)]
                   [divmodw
-                   (op 'divmodw '(uint64 uint64 uint64 uint64) 'uint64 'uint64 'uint64 'uint64)])
+                   (op 'divmodw '(uint64 uint64 uint64 uint64) 'uint64 'uint64 'uint64 'uint64)]
+                  [exp
+                   (op 'expw '(uint64) 'uint64 'uint64)]
+                  [expw
+                   (op 'expw '(uint64 uint64) 'uint64 'uint64)])
              (inc (op)
                   [sha256
                    (op 'sha256 '(bytes) 'bytes)])
@@ -435,7 +439,9 @@
                   [itob
                    (op 'btoi '(bytes) 'uint64)]
                   [concat
-                   (op 'concat '(bytes) 'bytes 'bytes)])
+                   (op 'concat '(bytes) 'bytes 'bytes)]
+                  [extract
+                   (op 'extract '(bytes) 'uint64 'uint64 'bytes)])
              (inc (unit >>= >>
                    get put upd)
                   [jump
@@ -455,27 +461,25 @@
                            (>> ((put 'callstack) cstk)
                                ((put 'pc) pc))]))])
              (inc (unit >>= >>
-                   get put upd)
+                   get put upd
+                   transaction-field-type)
                   [inner-transaction-begin
-                   ((put 'itxns) (cons (hasheq) (list)))]
+                   (unit)]
                   [inner-transaction-field
                    (λ (f v)
-                     (>>= (get 'itxns (list))
-                          (match-lambda
-                            [(cons itxn itxns)
-                             ((put 'itxns) (cons (hash-set itxn f v) itxns))])))]
+                     (>>= (get 'table (hash))
+                          (λ (σ)
+                            (let ([τ₀ (transaction-field-type f)]
+                                  [τ₁ (type-of v)])
+                              (cond
+                                [(unify τ₀ τ₁ σ)
+                                 => (put 'table)]
+                                [else
+                                 (λ (ς) `(type-error "inner transaction field expected value of type ~a but got value of type ~a" τ₀ τ₁))])))))]
                   [inner-transaction-submit
-                   (>>= (get 'itxns (list))
-                        (λ (itxns)
-                          (>> (upd 'itxns-submitted (list) (λ (itxnss) (cons itxns itxnss)))
-                              ((put 'itxns) (list)))))]
+                   (unit)]
                   [inner-transaction
-                   (λ (f)
-                     (>>= (get 'itxns-submitted (list))
-                          (λ (itxnss)
-                            (>>= (get 'itxns (list))
-                                 (λ (itxns)
-                                   (unit `(itxn ,(length itxnss) ,(length itxns) ,f)))))))])
+                   (λ (f) (unit (transaction-field-type f)))])
              (inc (unit >>= panic
                    get put)
                   [in-mode
@@ -607,7 +611,6 @@
           [`(type-safe ,assumptions)
            (if (set-empty? assumptions)
              (displayln (format #<<MSG
-
 Typecheck result: ~a
 
 The program is type-safe.
@@ -615,7 +618,6 @@ MSG
                              OK))
              (begin
                (displayln (format #<<MSG
-
 Typecheck result: ~a
 
 The program is type-safe, assuming:
@@ -627,7 +629,6 @@ MSG
                  (displayln assumption))))]
           [`(not-type-safe ,type-errors)
            (displayln (format #<<MSG
-
 Typecheck result: ~a
 
 The program does NOT typecheck:

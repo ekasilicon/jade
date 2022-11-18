@@ -3,7 +3,7 @@
          (only-in racket/string string-join)
          "../static/record.rkt"
          "../static/object.rkt"
-         "../error.rkt"
+         "../jade-error.rkt"
          "base.rkt"
          "uint.rkt"
          "bytes.rkt"
@@ -96,25 +96,23 @@
                       (?p comment)
                       eolp
                       (delay (loop)))))
-             (match ((loop)
-                     input i
-                     (λ (xs i fk)
-                       (if (= i (string-length input))
-                         (match-let ([(list x) xs]) x)
-                         (fk)))
-                     (λ ()
-                       (error 'bad-directive
-                              (report input i
-                                      "an instruction"
-                                      "a comment signalled by //"
-                                      "a #pragma directive"))))
-               [(error-result tag message)
-                (error-result tag message)]
-               [directives
-                (assembly [logic-sig-version lsv] directives)]))]
+             ((loop)
+              input i
+              (λ (xs i fk)
+                (if (= i (string-length input))
+                  (match-let ([(list directives) xs])
+                    (assembly [logic-sig-version lsv] directives))
+                  (fk)))
+              (λ ()
+                (jade-error 'bad-directive
+                            (report input i
+                                    "an instruction"
+                                    "a comment signalled by //"
+                                    "a #pragma directive"))))
+             )]
           [#f
-           (error 'teal-version-missing (report input 0 "#pragma version <teal-version>"))])]))
-   (λ () (error 'teal-version-missing (report input 0 "#pragma version <teal-version>")))))
+           (jade-error 'teal-version-missing (report input 0 "#pragma version <teal-version>"))])]))
+   (λ () (jade-error 'teal-version-missing (report input 0 "#pragma version <teal-version>")))))
 
 (provide parse)
 
@@ -126,11 +124,7 @@
 
   (let ([input (port->string (current-input-port))])
     (displayln input)
-    (match (time (parse input))
-      [(error-result tag message)
-       (displayln tag)
-       (displayln message)]
-      [asm
-       (displayln (assembly-show asm))
-       (pretty-print (control-flow-graph asm))])))
+    (let ([asm (time (parse input))])
+      (displayln (assembly-show asm))
+      (pretty-print (control-flow-graph asm)))))
 
