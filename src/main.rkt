@@ -241,7 +241,6 @@ MESSAGE
   (define result
     (command-line))
 
-  #;
   (uncaught-exception-handler
    (λ (e)
      (displayln "jade internal error:")
@@ -258,17 +257,21 @@ MESSAGE
     (displayln message)
     (exit 255))
 
-  (with-handlers ([jade-error? (match-lambda
-                                 [(jade-error tag message)
-                                  (report-error tag message #t)])])
-    (for-each
-     (match-lambda
-       [#f
-        (void)]
-       [(cons _ report)
-        (newline)
-        (displayln report)])
-     (result))))
+  (match result
+    [(jade-error tag message)
+     (report-error tag message #f)]
+    [report-maker
+     (with-handlers ([jade-error? (match-lambda
+                                    [(jade-error tag message)
+                                     (report-error tag message #t)])])
+       (for-each
+        (match-lambda
+          [#f
+           (void)]
+          [(cons _ report)
+           (newline)
+           (displayln report)])
+        (report-maker)))]))
 
 
 

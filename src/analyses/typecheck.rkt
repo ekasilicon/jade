@@ -647,12 +647,18 @@ MSG
              (displayln type-error))
            (displayln #<<MSG
 
-All operations encountering type mismatches were deemed type-safe.
+All operations before encountering type mismatches were deemed type-safe.
 
-The program MAY in fact be type-safe but ensure type safety in a way
-too subtle for the typechecker to recognize. Depending on the reported
-type errors, it may be worthwhile to refactor the code to use data in
-an obviously type-safe way.
+A general caveat:
+
+  The program MAY in fact be type-safe but ensure type safety in a way
+  too subtle for the typechecker to recognize.
+
+  In particular, if reported type errors concern only local and global values,
+  the type mismatch may lie solely in the initialization situation of them.
+
+  Depending on the reported type errors, it may be worthwhile to refactor the
+  code to use data in an obviously type-safe way.
 MSG
                   )])))))
 
