@@ -267,7 +267,7 @@
                        [(bytes? key)
                         (unit `(app-global ,key))]
                        [else
-                        (λ (ς) `(type-error ,(format "app-global-get of non-static key ~a not supported" key) ,ς))]))]
+                        (λ (ς) `(type-error ,(format "app-global-get of non-static key (~a) not supported" key) ,ς))]))]
                   [app-global-put
                    (λ (key val)
                      (cond
@@ -283,7 +283,7 @@
                                    [else
                                     (λ (ς) `(type-error ,(format "~a cannot have type ~a" (human-name `(app-global ,key)) τ₁) ,ς))]))))]
                        [else
-                        (λ (ς) `(type-error ,(format "app-global-put of non-static key ~s with value ~a not supported" (bytes->string/utf-8 key) val) ,ς))]))]
+                        (λ (ς) `(type-error ,(format "app-global-put of non-static key (~a) with value ~a not supported" key val) ,ς))]))]
                   [app-local-get
                    (λ (acct key)
                      (cond
@@ -291,7 +291,7 @@
                        [(bytes? key)
                         (unit `(app-local ,key))]
                        [else
-                        (λ (ς) `(type-error ,(format "app-local-get of non-static key ~s not supported" (bytes->string/utf-8 key)) ,ς))]))]
+                        (λ (ς) `(type-error ,(format "app-local-get of non-static key (~a) not supported" key) ,ς))]))]
                   [app-local-put
                    (λ (acct key val)
                      (cond
@@ -307,7 +307,7 @@
                                    [else
                                     (λ (ς) `(type-error ,(format "local at key ~s cannot have type ~a" (bytes->string/utf-8 key) τ₁) ,ς))]))))]
                        [else
-                        (λ (ς) `(type-error ,(format "app-local-put of non-static key ~s with value ~a not supported" key val) ,ς))]))]
+                        (λ (ς) `(type-error ,(format "app-local-put of non-static key (~a) with value ~a not supported" key val) ,ς))]))]
                   [app-local-get-ex
                    (λ (acct app-id key)
                      ; a key must be exact and have the same type for all applications
@@ -316,7 +316,7 @@
                         (mplus (unit `(app-local ,key) 1)
                                (unit 0 0))]
                        [else
-                        (λ (ς) `(type-error ,(format "app-local-get-ex of non-static key ~s not supported" key) ,ς))]))]
+                        (λ (ς) `(type-error ,(format "app-local-get-ex of non-static key (~a) not supported" key) ,ς))]))]
                   [asset-holding-field-type
                    (match-lambda
                      [`#s(AssetBalance) 'uint64]
@@ -355,7 +355,7 @@
                         (mplus (unit `(app-global ,key) 1)
                                (unit 0 0))]
                        [else
-                        (jade-error 'typechecker "app-global-get-ex of app ~a and non-static key ~a not supported" app-id key)]))]
+                        (jade-error 'typechecker "app-global-get-ex of app ~a and non-static key (~a) not supported" app-id key)]))]
                   [balance
                    (λ (app-id) (unit 'uint64))]
                   [min-balance
